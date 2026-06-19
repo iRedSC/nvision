@@ -85,4 +85,4 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-HACS uses the latest release for installs and updates. The default branch is source-only (`dist/` is not committed).
+HACS uses the latest release for installs and updates. `dist/nvision.js` is committed on `main` so HACS can validate the repository.
