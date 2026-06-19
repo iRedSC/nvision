@@ -53,3 +53,36 @@ Use these when implementing new cards. Copy patterns from `src/cards/blank/` rat
 Type: `custom:nvision-blank-card`
 
 Minimal neutral card with entity picker and optional name in the visual editor. Uses HA-native web components and theme variables only — no custom color palette or Mushroom styling.
+
+## Install via HACS
+
+1. In HACS, open **Frontend** → **⋮** → **Custom repositories**.
+2. Add this repository URL, category **Dashboard**.
+3. Install **nvision** and add the Lovelace resource when prompted (or use `/hacsfiles/nvision/nvision.js`).
+
+Updates appear in HACS after a GitHub release is published.
+
+### Cards
+
+| Type | Description |
+|------|-------------|
+| `custom:nvision-blank-card` | Minimal neutral card |
+| `custom:nvision-activity-card` | Activity timeline |
+| `custom:nvision-air-quality-card` | Air quality |
+| `custom:nvision-circle-gauge-card` | Circle gauge |
+| `custom:nvision-light-card` | Light control |
+| `custom:nvision-liquid-card` | Liquid fill gauge |
+| `custom:nvision-power-draw-card` | Power draw |
+| `custom:nvision-power-glance-card` | Power glance |
+| `custom:nvision-waveform-card` | Waveform |
+
+## Releases
+
+Push a semver tag to publish a release (CI builds and attaches `nvision.js`):
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+HACS uses the latest release for installs and updates. The default branch is source-only (`dist/` is not committed).

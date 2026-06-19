@@ -1,15 +1,14 @@
 import { css } from "lit";
 
-/** Scales card text and icons with the card's grid cell size. */
+/** Typography and icon sizes aligned with Home Assistant tile cards. */
 export const responsiveTypeStyles = css`
   :host {
-    container-type: size;
-    --nv-value-font-size: clamp(1.125rem, 16cqmin, 3rem);
-    --nv-label-font-size: clamp(0.6875rem, 7.5cqmin, 1.125rem);
-    --nv-title-font-size: clamp(0.8125rem, 9cqmin, 1.375rem);
-    --nv-subtitle-font-size: clamp(0.6875rem, 7cqmin, 1rem);
-    --nv-icon-size: clamp(24px, 20cqmin, 48px);
-    --nv-gauge-max-size: min(100%, 72cqmin);
+    --nv-value-font-size: var(--ha-font-size-l);
+    --nv-label-font-size: var(--ha-font-size-s);
+    --nv-title-font-size: var(--ha-font-size-m);
+    --nv-subtitle-font-size: var(--ha-font-size-s);
+    --nv-icon-size: 24px;
+    --nv-gauge-max-size: min(100%, 160px);
   }
 `;
 

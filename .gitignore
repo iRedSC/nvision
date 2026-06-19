@@ -1,4 +1,14 @@
 node_modules/
 dist/
+dist-gallery/
 .hass_dev/
 refs/
+
+# Local env / secrets
+.env
+.env.*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

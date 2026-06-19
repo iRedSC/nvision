@@ -301,8 +301,6 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
       --columns: 3;
       --lightning-color: var(--warning-color, #ffb300);
       --lightning-glow: 0;
-      --nv-value-font-size: clamp(0.875rem, 11cqmin, 2rem);
-      --nv-label-font-size: clamp(0.625rem, 6cqmin, 0.9375rem);
       display: block;
       height: 100%;
     }

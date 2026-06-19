@@ -14,6 +14,12 @@ export interface HomeAssistant {
   states: HassEntities;
   services: HassServices;
   localize: (key: string, ...args: unknown[]) => string;
+  callService: (
+    domain: string,
+    service: string,
+    serviceData?: Record<string, unknown>,
+    target?: Record<string, unknown>
+  ) => Promise<void>;
   user?: { name: string };
   themes: unknown;
   locale?: { language: string };

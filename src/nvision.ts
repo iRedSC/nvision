@@ -8,6 +8,7 @@ import "./cards/air-quality/air-quality-card";
 import "./cards/circle-gauge/circle-gauge-card";
 import "./cards/power-draw/power-draw-card";
 import "./cards/power-glance/power-glance-card";
+import "./cards/light/light-card";
 
 console.info(
   `%c nvision ${version} `,
