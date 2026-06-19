@@ -287,7 +287,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   }
 
   private _applyShake(intensity: number): void {
-    const { shakeAt, shakePeak, shakeSpeed } = this._shakeThresholds();
+    const { shakeAt, shakePeak } = this._shakeThresholds();
 
     if (intensity < shakeAt) {
       this.style.transform = "";
@@ -295,7 +295,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     const amount = ((intensity - shakeAt) / (1 - shakeAt)) * shakePeak;
-    const t = this._phase * shakeSpeed;
+    const t = this._phase;
     const x =
       Math.sin(t * 14.3) * amount * 2.4 +
       Math.cos(t * 19.7) * amount * 1.2;
@@ -353,13 +353,18 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     this._syncIntensity();
     const rawIntensity = this._tickIntensity(delta);
     const animIntensity = Math.max(0.12, rawIntensity);
+    const { shakeSpeed } = this._shakeThresholds();
     const presets = this._presets();
     const frenzy =
       rawIntensity > DEFAULT_SHAKE_AT
         ? 1 + (rawIntensity - DEFAULT_SHAKE_AT) * 2.2
         : 1;
     this._phase +=
-      delta * (0.045 + animIntensity * 0.13) * presets.phaseSpeed * frenzy;
+      delta *
+      (0.014 + animIntensity * animIntensity * 0.1) *
+      presets.phaseSpeed *
+      frenzy *
+      shakeSpeed;
     this._applyShake(rawIntensity);
 
     const waveColor = resolveWaveColor(this._config?.color, this);

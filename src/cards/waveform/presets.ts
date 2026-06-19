@@ -70,9 +70,16 @@ function smoothstep(value: number): number {
 }
 
 function motionAmplitude(intensity: number, height: number): number {
-  const spread = smoothstep(intensity);
-  const surge = Math.max(0, intensity - 0.5) ** 2;
-  return height * (0.12 + spread * 0.32 + surge * 0.28);
+  const t = Math.max(0.08, intensity);
+  const spread = smoothstep(t);
+  const surge = Math.max(0, t - 0.5) ** 2;
+  const lowBias = (1 - spread) * 0.16;
+  return height * (0.28 + lowBias + spread * 0.22 + surge * 0.26);
+}
+
+function motionFrequency(intensity: number): number {
+  const spread = smoothstep(Math.max(0.08, intensity));
+  return 0.42 + spread * 0.68;
 }
 
 function waveIndex(input: MotionInput): number {
@@ -295,9 +302,10 @@ function waveMotion(input: MotionInput): DotDrawParams {
   const spread = smoothstep(intensity);
   const localPhase = phase + variant * 1.85;
   const index = waveIndex(input);
+  const freq = motionFrequency(intensity);
   const wave =
-    Math.sin(localPhase * 1.05 - index) * amp +
-    Math.sin(localPhase * 0.52 - index * 0.5) * amp * spread * 0.55;
+    Math.sin(localPhase * freq - index) * amp +
+    Math.sin(localPhase * freq * 0.5 - index * 0.5) * amp * spread * 0.55;
 
   return {
     x: baseX,
@@ -313,7 +321,7 @@ function pulseMotion(input: MotionInput): DotDrawParams {
   const group = Math.floor(index / 4);
   const breathe = Math.sin(phase * 0.75 + group * 1.15 + variant * 0.6);
   const bob =
-    Math.sin(phase + dot.seed * 6.28) * input.height * 0.018 * (0.35 + spread);
+    Math.sin(phase + dot.seed * 6.28) * input.height * 0.04 * (0.5 + spread * 0.65);
 
   return {
     x: baseX,
@@ -329,9 +337,10 @@ function streamMotion(input: MotionInput): DotDrawParams {
   const amp = motionAmplitude(intensity, height);
   const localPhase = phase + variant * 1.2;
   const index = waveIndex(input);
+  const freq = motionFrequency(intensity);
   const drift =
-    Math.sin(localPhase * 0.62 + index * 0.35) * amp * (0.75 + spread * 0.85);
-  const ripple = Math.sin(localPhase * 1.1 - index) * amp * 0.65;
+    Math.sin(localPhase * freq * 0.58 + index * 0.35) * amp * (0.75 + spread * 0.85);
+  const ripple = Math.sin(localPhase * freq - index) * amp * 0.65;
 
   return {
     x: baseX + drift,
@@ -344,7 +353,7 @@ function streamMotion(input: MotionInput): DotDrawParams {
 function spectrumMotion(input: MotionInput): DotDrawParams {
   const { dot, index, phase, intensity, height, baseX, baseY } = input;
   const spread = smoothstep(intensity);
-  const amp = height * (0.08 + spread * 0.38);
+  const amp = height * (0.14 + spread * 0.34);
   const bar =
     (Math.sin(phase * 0.9 + dot.seed * 8.4) * 0.55 +
       Math.sin(phase * 1.7 + index * 0.42 + dot.phase) * 0.45 +
@@ -379,7 +388,8 @@ function cascadeMotion(input: MotionInput): DotDrawParams {
   const t = count <= 1 ? 1 : index / (count - 1);
   const localPhase = phase + variant * 1.4;
   const waveIdx = waveIndex(input);
-  const ripple = Math.sin(localPhase * 1.15 - waveIdx * 1.5) * amp;
+  const freq = motionFrequency(intensity);
+  const ripple = Math.sin(localPhase * freq * 1.1 - waveIdx * 1.5) * amp;
   const build = 0.45 + t * (0.55 + spread * 0.4);
 
   return {
