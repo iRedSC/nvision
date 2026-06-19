@@ -1,0 +1,24 @@
+{
+  "name": "nvision",
+  "version": "0.1.0",
+  "description": "Home Assistant dashboard cards",
+  "scripts": {
+    "start": "concurrently --kill-others --names cards,gallery \"vite build --watch\" \"vite --config vite.gallery.config.ts\"",
+    "build": "vite build",
+    "gallery": "vite --config vite.gallery.config.ts",
+    "sync-gallery": "powershell -ExecutionPolicy Bypass -File scripts/sync-gallery.ps1",
+    "fetch-refs": "powershell -ExecutionPolicy Bypass -File scripts/fetch-refs.ps1"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "home-assistant-js-websocket": "^9.6.0",
+    "lit": "^3.3.2"
+  },
+  "devDependencies": {
+    "browserslist-to-esbuild": "^2.1.1",
+    "concurrently": "^10.0.3",
+    "terser": "^5.47.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.11"
+  }
+}

@@ -1,0 +1,16 @@
+import type { LovelaceCardConfig } from "../../types";
+import type { ConfigColor } from "../../utils/colors";
+
+export interface AirQualityCardConfig extends LovelaceCardConfig {
+  type: `custom:${string}`;
+  entity?: string;
+  name?: string;
+  min?: number;
+  max?: number;
+  color_good?: ConfigColor;
+  color_warning?: ConfigColor;
+  color_bad?: ConfigColor;
+  color_mist?: ConfigColor;
+  color_clear?: ConfigColor;
+  color_sky?: ConfigColor;
+}

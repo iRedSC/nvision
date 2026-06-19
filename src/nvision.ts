@@ -1,0 +1,15 @@
+import { version } from "../package.json";
+
+import "./cards/blank/blank-card";
+import "./cards/activity/activity-card";
+import "./cards/liquid/liquid-card";
+import "./cards/waveform/waveform-card";
+import "./cards/air-quality/air-quality-card";
+import "./cards/circle-gauge/circle-gauge-card";
+import "./cards/power-draw/power-draw-card";
+import "./cards/power-glance/power-glance-card";
+
+console.info(
+  `%c nvision ${version} `,
+  "color: var(--primary-color, #03a9f4); font-weight: 700;"
+);
