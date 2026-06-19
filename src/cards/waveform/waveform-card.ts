@@ -31,6 +31,7 @@ import {
   baseDotRadius,
   buildDots,
   computeDotDrawParams,
+  computeMotionActivity,
   contentFade,
   edgeFade,
   resolvePresets,
@@ -286,15 +287,15 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     return this._displayIntensity;
   }
 
-  private _applyShake(intensity: number): void {
+  private _applyShake(activity: number): void {
     const { shakeAt, shakePeak } = this._shakeThresholds();
 
-    if (intensity < shakeAt) {
+    if (activity < shakeAt) {
       this.style.transform = "";
       return;
     }
 
-    const amount = ((intensity - shakeAt) / (1 - shakeAt)) * shakePeak;
+    const amount = ((activity - shakeAt) / (1 - shakeAt)) * shakePeak;
     const t = this._phase;
     const x =
       Math.sin(t * 14.3) * amount * 2.4 +
@@ -355,9 +356,15 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     const animIntensity = Math.max(0.12, rawIntensity);
     const { shakeSpeed } = this._shakeThresholds();
     const presets = this._presets();
+    const motionActivity = computeMotionActivity(
+      presets.motion,
+      rawIntensity,
+      presets.phaseSpeed,
+      shakeSpeed
+    );
     const frenzy =
-      rawIntensity > DEFAULT_SHAKE_AT
-        ? 1 + (rawIntensity - DEFAULT_SHAKE_AT) * 2.2
+      motionActivity > DEFAULT_SHAKE_AT
+        ? 1 + (motionActivity - DEFAULT_SHAKE_AT) * 2.2
         : 1;
     this._phase +=
       delta *
@@ -365,7 +372,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       presets.phaseSpeed *
       frenzy *
       shakeSpeed;
-    this._applyShake(rawIntensity);
+    this._applyShake(motionActivity);
 
     const waveColor = resolveWaveColor(this._config?.color, this);
     const scale = Math.min(width, height);
@@ -395,9 +402,10 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
           scale,
           presets.layout
         ) * contentFade(params.x, params.y, width, height);
-      const radius = baseRadius * params.radiusMul;
+      const radius =
+        baseRadius * params.radiusMul * (0.82 + animIntensity * 0.28);
       const alpha =
-        (0.34 + animIntensity * 0.5) * params.alphaMul * fade;
+        (0.3 + animIntensity * 0.52) * params.alphaMul * fade;
 
       this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
     }

@@ -15,6 +15,8 @@ import {
 export interface ScopeDot {
   phase: number;
   seed: number;
+  /** Primary-axis travel direction for spawn motion */
+  sign: number;
 }
 
 export interface ResolvedPresets {
@@ -207,10 +209,43 @@ export function resolvePresets(config: WaveformCardConfig): ResolvedPresets {
 }
 
 export function buildDots(count: number): ScopeDot[] {
-  return Array.from({ length: count }, (_, index) => ({
-    phase: (index / count) * Math.PI * 2,
-    seed: (index * 0.618033988749895) % 1,
-  }));
+  return Array.from({ length: count }, (_, index) => {
+    const seed = (index * 0.618033988749895) % 1;
+    return {
+      phase: (index / count) * Math.PI * 2,
+      seed,
+      sign: seed > 0.5 ? 1 : -1,
+    };
+  });
+}
+
+/** 0–1 activity level used to gate card shake against actual dot motion */
+export function computeMotionActivity(
+  motion: WaveformMotion,
+  intensity: number,
+  phaseSpeed: number,
+  shakeSpeed: number
+): number {
+  const t = Math.max(0.08, intensity);
+  const spread = smoothstep(t);
+  const rate = (0.014 + t * t * 0.1) * phaseSpeed * shakeSpeed;
+
+  switch (motion) {
+    case "jet": {
+      const stream = 0.14 + spread * 0.86;
+      const amp = 0.12 + spread * 0.78;
+      return Math.min(
+        1,
+        stream * 0.42 + amp * 0.48 + rate * 1.4 + spread * spread * 0.35
+      );
+    }
+    case "spawn": {
+      const spawnRate = (0.55 + spread * 0.85) * 0.14 * shakeSpeed;
+      return Math.min(1, spread * 0.85 * spawnRate * 5.5 + rate * 0.9);
+    }
+    default:
+      return Math.min(1, spread * spread * 1.05 * shakeSpeed + rate * 0.75);
+  }
 }
 
 function lineBaseY(height: number): number {
@@ -278,66 +313,76 @@ function spawnMotion(input: MotionInput): DotDrawParams {
   const life = fract(phase * speed * 0.14 + dot.seed * period);
   const fade = Math.sin(life * Math.PI);
   const travel = motionAmplitude(intensity, height) * life * 1.15;
+  const direction = dot.sign;
 
   if (layout === "ring") {
     const cx = width / 2;
     const cy = height / 2;
     const angle = Math.atan2(baseY - cy, baseX - cx);
     const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
-    const radial = { x: Math.cos(angle), y: Math.sin(angle) };
-    const drift = travel * (0.35 + dot.seed * 0.4);
+    const drift = travel * direction * (0.45 + dot.seed * 0.35);
     return withChaos(input, {
-      x: baseX + tangential.x * drift + radial.x * drift * 0.15,
-      y: baseY + tangential.y * drift + radial.y * drift * 0.15,
-      radiusMul: 0.7 + fade * spread * 0.45,
-      alphaMul: fade * (0.35 + spread * 0.55),
+      x: baseX + tangential.x * drift,
+      y: baseY + tangential.y * drift,
+      radiusMul: 0.52 + fade * (0.65 + spread * 0.35),
+      alphaMul: fade * (0.32 + spread * 0.58),
     });
   }
 
   const axes = motionAxes(input);
-  const drift = travel * (0.4 + dot.seed * 0.35);
+  const drift = travel * direction * (0.45 + dot.seed * 0.35);
   return withChaos(input, {
-    x: baseX + axes.primary.x * drift * 0.2 + axes.perp.x * drift * 0.08,
+    x: baseX + axes.primary.x * drift,
     y: baseY + axes.primary.y * drift,
-    radiusMul: 0.68 + fade * spread * 0.42,
+    radiusMul: 0.5 + fade * (0.62 + spread * 0.38),
     alphaMul: fade * (0.32 + spread * 0.58),
   });
 }
 
 function jetMotion(input: MotionInput): DotDrawParams {
-  const { dot, index, count, phase, intensity, height, width, baseY, layout } =
+  const { dot, index, count, phase, intensity, height, width, baseX, baseY, layout } =
     input;
-  const spread = smoothstep(intensity);
-  const speed = 0.28 + spread * 0.55;
-  const wobble = Math.sin(phase * 1.4 + dot.seed * 6.28) * height * 0.04 * spread;
+  const spread = smoothstep(Math.max(0.1, intensity));
+  const baseSpeed = 0.14 + spread * 0.62;
+  const dotSpeed = baseSpeed * (0.4 + dot.seed * 1.35);
+  const primaryAmp = motionAmplitude(intensity, height) * (0.18 + spread * 0.72);
+  const primaryWave =
+    Math.sin(phase * (1.6 + dot.seed * 0.8) + dot.seed * 9.4) * primaryAmp;
+  const speedNorm = dotSpeed / (baseSpeed * 1.75);
+  const radiusMul = 0.58 + speedNorm * 0.32 + spread * 0.28;
 
   if (layout === "ring") {
     const cx = width / 2;
     const cy = height / 2;
     const baseAngle =
       (index / count) * Math.PI * 2 - Math.PI / 2 + dot.seed * 0.35;
-    const angle = baseAngle + phase * speed * 0.22 * (1 + spread * 0.6);
+    const angle = baseAngle + phase * dotSpeed * 0.28 * (0.85 + spread * 0.75);
     const pad = Math.min(width, height) * 0.06;
-    const radius = Math.min(width, height) / 2 - pad;
+    const orbitRadius = Math.min(width, height) / 2 - pad;
+    const expandSpan = orbitRadius * (0.1 + spread * 0.26);
+    const outward = fract(phase * dotSpeed * 0.032 + dot.seed * 1.9);
+    const radius = orbitRadius + outward * expandSpan;
+    const outwardFade = 1 - outward * 0.35;
     return withChaos(input, {
       x: cx + Math.cos(angle) * radius,
       y: cy + Math.sin(angle) * radius,
-      radiusMul: 0.82 + spread * 0.22,
-      alphaMul: 0.55 + spread * 0.38,
+      radiusMul: radiusMul * (0.92 + outward * 0.18),
+      alphaMul: (0.46 + speedNorm * 0.22 + spread * 0.36) * outwardFade,
     });
   }
 
-  const bleed = width * 0.08;
-  const lane = baseY + wobble;
+  const bleed = width * 0.1;
+  const lane = baseY + primaryWave;
   const x =
-    fract(phase * speed * 0.16 + dot.seed + index * 0.07) * (width + bleed * 2) -
+    fract(phase * dotSpeed * 0.2 + dot.seed * 2.1 + index * 0.04) *
+      (width + bleed * 2) -
     bleed;
 
   return withChaos(input, {
     x,
     y: lane,
-    radiusMul: 0.78 + spread * 0.28,
-    alphaMul: 0.5 + spread * 0.42,
+    radiusMul,
+    alphaMul: 0.42 + speedNorm * 0.2 + spread * 0.4,
   });
 }
 
@@ -353,6 +398,7 @@ function surgeMotion(input: MotionInput): DotDrawParams {
   const pulse = Math.sin(columnPhase) * 0.5 + 0.5;
   const travel = amp * (0.25 + pulse * (0.55 + spread * 0.65));
   const inset = height * 0.06;
+  const radiusMul = 0.58 + pulse * (0.28 + spread * 0.42);
 
   if (layout === "ring") {
     const cx = input.width / 2;
@@ -364,8 +410,8 @@ function surgeMotion(input: MotionInput): DotDrawParams {
     return withChaos(input, {
       x: cx + Math.cos(angle) * r,
       y: cy + Math.sin(angle) * r,
-      radiusMul: 0.74 + pulse * spread * 0.38,
-      alphaMul: 0.48 + pulse * spread * 0.46,
+      radiusMul,
+      alphaMul: 0.4 + pulse * (0.28 + spread * 0.48),
     });
   }
 
@@ -374,8 +420,8 @@ function surgeMotion(input: MotionInput): DotDrawParams {
   return withChaos(input, {
     x: baseX,
     y,
-    radiusMul: 0.72 + pulse * spread * 0.36,
-    alphaMul: 0.46 + pulse * spread * 0.48,
+    radiusMul,
+    alphaMul: 0.38 + pulse * (0.3 + spread * 0.5),
   });
 }
 
