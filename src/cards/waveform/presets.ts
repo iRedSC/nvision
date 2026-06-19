@@ -53,8 +53,8 @@ const SIZE_PRESETS: Record<
   WaveformSize,
   { dotScale: number; span: number; phaseSpeed: number }
 > = {
-  compact: { dotScale: 0.88, span: 0.86, phaseSpeed: 0.92 },
-  balanced: { dotScale: 1, span: 0.94, phaseSpeed: 1 },
+  compact: { dotScale: 0.88, span: 0.94, phaseSpeed: 0.92 },
+  balanced: { dotScale: 1, span: 0.98, phaseSpeed: 1 },
   expansive: { dotScale: 1.08, span: 1, phaseSpeed: 1.08 },
 };
 
@@ -69,10 +69,10 @@ function smoothstep(value: number): number {
   return value * value * (3 - 2 * value);
 }
 
-function motionAmplitude(intensity: number, scale: number): number {
+function motionAmplitude(intensity: number, height: number): number {
   const spread = smoothstep(intensity);
   const surge = Math.max(0, intensity - 0.5) ** 2;
-  return scale * (0.016 + spread * 0.13 + surge * 0.16);
+  return height * (0.12 + spread * 0.32 + surge * 0.28);
 }
 
 function waveIndex(input: MotionInput): number {
@@ -83,7 +83,7 @@ function waveIndex(input: MotionInput): number {
 }
 
 function horizontalJitter(input: MotionInput): number {
-  const { phase, intensity, scale, dot, variant } = input;
+  const { phase, intensity, dot, variant } = input;
   if (intensity <= 0.28) {
     return 0;
   }
@@ -91,7 +91,7 @@ function horizontalJitter(input: MotionInput): number {
   const spread = smoothstep(intensity);
   const localPhase = (phase + variant * 1.2) * (1 + intensity * 0.15);
   const localIndex = input.index + variant * 0.47;
-  const amp = scale * spread * (0.012 + Math.max(0, intensity - 0.55) * 0.1);
+  const amp = input.width * spread * (0.04 + Math.max(0, intensity - 0.55) * 0.22);
 
   return (
     Math.sin(localPhase * (3.1 + dot.seed * 2.4) + localIndex * 0.85) * amp +
@@ -103,7 +103,7 @@ function horizontalJitter(input: MotionInput): number {
 }
 
 function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: number } {
-  const { dot, index, phase, intensity, scale, variant } = input;
+  const { dot, index, phase, intensity, variant } = input;
   if (intensity <= 0.38) {
     return { x, y };
   }
@@ -114,18 +114,18 @@ function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: n
   let ox = horizontalJitter(input);
   let oy =
     Math.sin(localPhase * (2.2 + dot.seed * 2) + localIndex * 1.15) *
-    scale *
+    input.height *
     disturb *
-    0.085;
+    0.14;
 
   if (intensity > 0.45) {
     const chaos = (intensity - 0.45) ** 2;
-    oy += Math.sin(localPhase * 8.2 + localIndex * 2.1) * scale * chaos * 0.12;
+    oy += Math.sin(localPhase * 8.2 + localIndex * 2.1) * input.height * chaos * 0.2;
     ox +=
       Math.cos(localPhase * 7.4 + localIndex * 1.7 + dot.phase + variant) *
-      scale *
+      input.height *
       chaos *
-      0.1;
+      0.16;
   }
 
   if (input.layout === "ring") {
@@ -232,11 +232,8 @@ export function buildDots(count: number): ScopeDot[] {
   }));
 }
 
-function lineBaseY(height: number, intensity: number): number {
-  const spread = smoothstep(intensity);
-  const quietY = height * 0.62;
-  const loudY = height * 0.38;
-  return quietY + (loudY - quietY) * spread;
+function lineBaseY(height: number): number {
+  return height * 0.5;
 }
 
 function basePosition(
@@ -246,17 +243,17 @@ function basePosition(
   width: number,
   height: number,
   span: number,
-  intensity: number
+  _intensity: number
 ): { x: number; y: number } {
   const scale = Math.min(width, height);
-  const bleed = scale * 0.1;
+  const bleed = scale * 0.04;
 
   switch (layout) {
     case "ring": {
       const cx = width / 2;
       const cy = height / 2;
-      const pad = scale * 0.14;
-      const radius = (Math.min(width, height) / 2 - pad) * (0.84 + span * 0.1);
+      const pad = scale * 0.06;
+      const radius = (Math.min(width, height) / 2 - pad) * (0.92 + span * 0.06);
       const angle = ((index + 0.5) / count) * Math.PI * 2 - Math.PI / 2;
       return {
         x: cx + Math.cos(angle) * radius,
@@ -268,8 +265,8 @@ function basePosition(
       const rows = Math.ceil(count / cols);
       const col = index % cols;
       const row = Math.floor(index / cols);
-      const padX = scale * 0.1;
-      const padY = scale * 0.12;
+      const padX = scale * 0.04;
+      const padY = scale * 0.04;
       const gap = scale * 0.028 * span;
       const cellW = (width - 2 * padX - gap * (cols - 1)) / cols;
       const cellH = (height - 2 * padY - gap * (rows - 1)) / rows;
@@ -286,21 +283,21 @@ function basePosition(
       const start = (innerLeft + innerRight - lineSpan) / 2;
       return {
         x: start + t * lineSpan,
-        y: lineBaseY(height, intensity),
+        y: lineBaseY(height),
       };
     }
   }
 }
 
 function waveMotion(input: MotionInput): DotDrawParams {
-  const { phase, intensity, scale, baseX, baseY, variant } = input;
-  const amp = motionAmplitude(intensity, scale);
+  const { phase, intensity, height, baseX, baseY, variant } = input;
+  const amp = motionAmplitude(intensity, height);
   const spread = smoothstep(intensity);
   const localPhase = phase + variant * 1.85;
   const index = waveIndex(input);
   const wave =
     Math.sin(localPhase * 1.05 - index) * amp +
-    Math.sin(localPhase * 0.52 - index * 0.5) * amp * spread * 0.4;
+    Math.sin(localPhase * 0.52 - index * 0.5) * amp * spread * 0.55;
 
   return {
     x: baseX,
@@ -311,11 +308,12 @@ function waveMotion(input: MotionInput): DotDrawParams {
 }
 
 function pulseMotion(input: MotionInput): DotDrawParams {
-  const { dot, index, phase, intensity, scale, baseX, baseY, variant } = input;
+  const { dot, index, phase, intensity, baseX, baseY, variant } = input;
   const spread = smoothstep(intensity);
   const group = Math.floor(index / 4);
   const breathe = Math.sin(phase * 0.75 + group * 1.15 + variant * 0.6);
-  const bob = Math.sin(phase + dot.seed * 6.28) * scale * 0.006 * (0.35 + spread);
+  const bob =
+    Math.sin(phase + dot.seed * 6.28) * input.height * 0.018 * (0.35 + spread);
 
   return {
     x: baseX,
@@ -326,14 +324,14 @@ function pulseMotion(input: MotionInput): DotDrawParams {
 }
 
 function streamMotion(input: MotionInput): DotDrawParams {
-  const { phase, intensity, scale, baseX, baseY, variant } = input;
+  const { phase, intensity, height, baseX, baseY, variant } = input;
   const spread = smoothstep(intensity);
-  const amp = motionAmplitude(intensity, scale);
+  const amp = motionAmplitude(intensity, height);
   const localPhase = phase + variant * 1.2;
   const index = waveIndex(input);
   const drift =
-    Math.sin(localPhase * 0.62 + index * 0.35) * amp * (0.6 + spread * 0.75);
-  const ripple = Math.sin(localPhase * 1.1 - index) * amp * 0.5;
+    Math.sin(localPhase * 0.62 + index * 0.35) * amp * (0.75 + spread * 0.85);
+  const ripple = Math.sin(localPhase * 1.1 - index) * amp * 0.65;
 
   return {
     x: baseX + drift,
@@ -344,15 +342,15 @@ function streamMotion(input: MotionInput): DotDrawParams {
 }
 
 function spectrumMotion(input: MotionInput): DotDrawParams {
-  const { dot, index, phase, intensity, scale, baseX, baseY } = input;
+  const { dot, index, phase, intensity, height, baseX, baseY } = input;
   const spread = smoothstep(intensity);
-  const amp = scale * (0.02 + spread * 0.14);
+  const amp = height * (0.08 + spread * 0.38);
   const bar =
     (Math.sin(phase * 0.9 + dot.seed * 8.4) * 0.55 +
       Math.sin(phase * 1.7 + index * 0.42 + dot.phase) * 0.45 +
       1) *
     0.5;
-  const heightOffset = bar * amp * (0.25 + spread * 0.95);
+  const heightOffset = bar * amp * (0.35 + spread * 1.05);
 
   return {
     x: baseX,
@@ -375,10 +373,9 @@ function echoMotion(input: MotionInput): DotDrawParams {
 }
 
 function cascadeMotion(input: MotionInput): DotDrawParams {
-  const { index, count, phase, intensity, scale, baseX, baseY, variant } =
-    input;
+  const { index, count, phase, intensity, baseX, baseY, variant } = input;
   const spread = smoothstep(intensity);
-  const amp = motionAmplitude(intensity, scale);
+  const amp = motionAmplitude(intensity, input.height);
   const t = count <= 1 ? 1 : index / (count - 1);
   const localPhase = phase + variant * 1.4;
   const waveIdx = waveIndex(input);
@@ -460,6 +457,35 @@ export function computeDotDrawParams(
     },
     result
   );
+}
+
+export function contentFade(
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): number {
+  const fadeStart = width * 0.04;
+  const fadeEnd = width * 0.58;
+  let horizontal = 1;
+
+  if (x < fadeEnd) {
+    horizontal =
+      x <= fadeStart
+        ? 0.06
+        : 0.06 + 0.94 * smoothstep((x - fadeStart) / (fadeEnd - fadeStart));
+  }
+
+  const centerY = height * 0.5;
+  const band = height * 0.42;
+  const distY = Math.abs(y - centerY);
+  let vertical = 1;
+
+  if (x < fadeEnd && distY < band) {
+    vertical = 0.08 + 0.92 * smoothstep(distY / band);
+  }
+
+  return horizontal * vertical;
 }
 
 export function edgeFade(

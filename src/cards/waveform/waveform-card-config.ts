@@ -26,6 +26,7 @@ export interface WaveformCardConfig extends LovelaceCardConfig {
   motion?: WaveformMotion;
   shake_at?: number;
   shake_peak?: number;
+  shake_speed?: number;
 
   /** @deprecated Use layout, size, and motion presets */
   shape?: WaveformShape;

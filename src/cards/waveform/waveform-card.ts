@@ -22,6 +22,7 @@ import {
   DEFAULT_MOTION,
   DEFAULT_SHAKE_AT,
   DEFAULT_SHAKE_PEAK,
+  DEFAULT_SHAKE_SPEED,
   DEFAULT_SIZE,
   WAVEFORM_CARD_EDITOR_NAME,
   WAVEFORM_CARD_NAME,
@@ -30,6 +31,7 @@ import {
   baseDotRadius,
   buildDots,
   computeDotDrawParams,
+  contentFade,
   edgeFade,
   resolvePresets,
   type ScopeDot,
@@ -104,6 +106,8 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: WaveformCardConfig;
 
+  @query(".stage") private _stage?: HTMLElement;
+
   @query("canvas") private _canvas?: HTMLCanvasElement;
 
   private _ctx?: CanvasRenderingContext2D;
@@ -125,6 +129,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       motion: DEFAULT_MOTION,
       shake_at: DEFAULT_SHAKE_AT,
       shake_peak: DEFAULT_SHAKE_PEAK,
+      shake_speed: DEFAULT_SHAKE_SPEED,
       ...config,
     };
     this._syncDots();
@@ -141,10 +146,15 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
   }
 
-  private _shakeThresholds(): { shakeAt: number; shakePeak: number } {
+  private _shakeThresholds(): {
+    shakeAt: number;
+    shakePeak: number;
+    shakeSpeed: number;
+  } {
     return {
       shakeAt: this._config?.shake_at ?? DEFAULT_SHAKE_AT,
       shakePeak: this._config?.shake_peak ?? DEFAULT_SHAKE_PEAK,
+      shakeSpeed: this._config?.shake_speed ?? DEFAULT_SHAKE_SPEED,
     };
   }
 
@@ -215,7 +225,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     this._resizeObserver = new ResizeObserver(() => this._resizeCanvas());
-    this._resizeObserver.observe(canvas.parentElement ?? this);
+    this._resizeObserver.observe(this._stage ?? canvas.parentElement ?? this);
     this._resizeCanvas();
     this._lastFrame = 0;
     this._startAnimation();
@@ -277,7 +287,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   }
 
   private _applyShake(intensity: number): void {
-    const { shakeAt, shakePeak } = this._shakeThresholds();
+    const { shakeAt, shakePeak, shakeSpeed } = this._shakeThresholds();
 
     if (intensity < shakeAt) {
       this.style.transform = "";
@@ -285,13 +295,14 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     const amount = ((intensity - shakeAt) / (1 - shakeAt)) * shakePeak;
+    const t = this._phase * shakeSpeed;
     const x =
-      Math.sin(this._phase * 14.3) * amount * 2.4 +
-      Math.cos(this._phase * 19.7) * amount * 1.2;
+      Math.sin(t * 14.3) * amount * 2.4 +
+      Math.cos(t * 19.7) * amount * 1.2;
     const y =
-      Math.cos(this._phase * 16.1) * amount * 1.8 +
-      Math.sin(this._phase * 11.2) * amount * 0.9;
-    const rot = Math.sin(this._phase * 21.5) * amount * 0.4;
+      Math.cos(t * 16.1) * amount * 1.8 +
+      Math.sin(t * 11.2) * amount * 0.9;
+    const rot = Math.sin(t * 21.5) * amount * 0.4;
 
     this.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg)`;
   }
@@ -372,14 +383,15 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
           variant as 0 | 1
         );
 
-        const fade = edgeFade(
-          params.x,
-          params.y,
-          width,
-          height,
-          scale,
-          presets.layout
-        );
+        const fade =
+          edgeFade(
+            params.x,
+            params.y,
+            width,
+            height,
+            scale,
+            presets.layout
+          ) * contentFade(params.x, params.y, width, height);
         const radius = baseRadius * params.radiusMul;
         const alpha =
           (0.34 + animIntensity * 0.5) * params.alphaMul * fade;
@@ -408,6 +420,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     return html`
       <ha-card>
         <div class="stage">
+          <canvas aria-hidden="true"></canvas>
           <div class="content">
             ${stateObj
               ? html`<ha-state-icon
@@ -419,9 +432,6 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
               .primary=${value}
               .secondary=${name}
             ></ha-tile-info>
-          </div>
-          <div class="waveform-zone">
-            <canvas aria-hidden="true"></canvas>
           </div>
         </div>
       </ha-card>
@@ -445,10 +455,20 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     .stage {
-      display: flex;
-      flex-direction: column;
+      position: relative;
       height: 100%;
-      min-height: 72px;
+      min-height: 56px;
+      overflow: hidden;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      pointer-events: none;
     }
 
     .content {
@@ -457,10 +477,11 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 10px 4px;
+      padding: 10px;
       box-sizing: border-box;
       width: 100%;
-      flex: none;
+      height: 100%;
+      min-height: 56px;
     }
 
     ha-state-icon {
@@ -471,23 +492,6 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     ha-tile-info {
       min-width: 0;
       flex: 1;
-    }
-
-    .waveform-zone {
-      position: relative;
-      flex: 1;
-      width: 100%;
-      min-height: 32px;
-      overflow: hidden;
-    }
-
-    canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      display: block;
-      pointer-events: none;
     }
   `,
   ];

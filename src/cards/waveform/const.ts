@@ -10,6 +10,7 @@ export const DEFAULT_MIN = 0;
 export const DEFAULT_MAX = 100;
 export const DEFAULT_SHAKE_AT = 0.72;
 export const DEFAULT_SHAKE_PEAK = 0.78;
+export const DEFAULT_SHAKE_SPEED = 0.45;
 
 export const DEFAULT_LAYOUT: WaveformLayout = "line";
 export const DEFAULT_SIZE = "balanced" as const;
