@@ -14,17 +14,20 @@ import {
 } from "../../utils/responsive-type";
 import {
   anchorCenter,
+  appendChaoticArcs,
   DEFAULT_EFFECTS_MAX,
   DEFAULT_EFFECTS_MIN,
   DEFAULT_POWER_MAX,
   DEFAULT_POWER_MIN,
   effectIntensity,
+  parseNumericState,
+  peakOverMaxRatio,
   powerTint,
   INTENSITY_LERP,
-  parseNumericState,
   PLUG_ICON,
   PowerLightningRenderer,
   resolveLightningColor,
+  resolveOverMaxColor,
   type LightningArc,
 } from "../../utils/power-lightning";
 import type { PowerGlanceCardConfig } from "./power-glance-card-config";
@@ -152,7 +155,21 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
   }
 
   private _lightningColor(): string {
+    if (this._overMaxSeverity() > 0) {
+      return resolveOverMaxColor(this);
+    }
+
     return resolveLightningColor(this._config?.color, this);
+  }
+
+  private _rawValues(): (number | undefined)[] {
+    return this._entityIds().map((entityId) =>
+      parseNumericState(this.hass?.states[entityId]?.state)
+    );
+  }
+
+  private _overMaxSeverity(): number {
+    return peakOverMaxRatio(this._rawValues(), this._config ?? {});
   }
 
   private _syncLightningTheme(): void {
@@ -210,7 +227,7 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
     if (!this._renderer) {
       this._renderer = new PowerLightningRenderer(
         this,
-        () => this._buildArcs(),
+        (phase) => this._buildArcs(phase),
         () => this._lightningColor(),
         (delta) => this._tickIntensities(delta)
       );
@@ -219,7 +236,7 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
     this._renderer.attach(canvas);
   }
 
-  private _buildArcs(): LightningArc[] {
+  private _buildArcs(phase: number): LightningArc[] {
     const canvas = this._canvas;
     if (!canvas) {
       return [];
@@ -232,6 +249,8 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
 
     const icons = this._entityIcons ? Array.from(this._entityIcons) : [];
     const entityIds = this._entityIds();
+    const color = this._lightningColor();
+    const severity = this._overMaxSeverity();
     const arcs: LightningArc[] = [];
 
     entityIds.forEach((entityId, index) => {
@@ -243,8 +262,20 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
         return;
       }
 
-      arcs.push({ from: plug, to: target, intensity });
+      arcs.push({ from: plug, to: target, intensity, color });
     });
+
+    if (severity > 0) {
+      appendChaoticArcs(
+        arcs,
+        plug,
+        canvas.clientWidth,
+        canvas.clientHeight,
+        severity,
+        phase,
+        color
+      );
+    }
 
     return arcs;
   }
@@ -256,8 +287,10 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
 
     const entities = this._entityIds();
 
+    const overMax = this._overMaxSeverity() > 0;
+
     return html`
-      <ha-card>
+      <ha-card class=${overMax ? "over-max" : ""}>
         <div class="stage">
           <div class="entities">
             ${entities.map((entityId) => {
@@ -303,11 +336,17 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
       --lightning-glow: 0;
       display: block;
       height: 100%;
+      overflow: visible;
+      position: relative;
     }
 
     ha-card {
       height: 100%;
       overflow: hidden;
+    }
+
+    ha-card.over-max {
+      overflow: visible;
     }
 
     .stage {
@@ -402,10 +441,10 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
 
     canvas {
       position: absolute;
-      inset: 0;
+      inset: -28px;
       z-index: 1;
-      width: 100%;
-      height: 100%;
+      width: calc(100% + 56px);
+      height: calc(100% + 56px);
       display: block;
       pointer-events: none;
     }

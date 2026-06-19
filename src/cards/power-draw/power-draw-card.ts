@@ -15,17 +15,21 @@ import {
 } from "../../utils/responsive-type";
 import {
   anchorCenter,
+  appendChaoticArcs,
   DEFAULT_EFFECTS_MAX,
   DEFAULT_EFFECTS_MIN,
   DEFAULT_POWER_MAX,
   DEFAULT_POWER_MIN,
   effectIntensity,
+  overMaxRatio,
+  parseNumericState,
+  peakOverMaxRatio,
   powerTint,
   INTENSITY_LERP,
-  parseNumericState,
   PLUG_ICON,
   PowerLightningRenderer,
   resolveLightningColor,
+  resolveOverMaxColor,
   type LightningArc,
 } from "../../utils/power-lightning";
 import type { PowerDrawCardConfig } from "./power-draw-card-config";
@@ -123,7 +127,28 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
   }
 
   private _lightningColor(): string {
+    if (this._overMaxSeverity() > 0) {
+      return resolveOverMaxColor(this);
+    }
+
     return resolveLightningColor(this._config?.color, this);
+  }
+
+  private _rawValue(): number | undefined {
+    const entity = this._config?.entity;
+    const state = entity ? this.hass?.states[entity]?.state : undefined;
+    return parseNumericState(state);
+  }
+
+  private _overMaxSeverity(): number {
+    const value = this._rawValue();
+    if (value === undefined) {
+      return 0;
+    }
+
+    const min = this._config?.min ?? DEFAULT_POWER_MIN;
+    const max = this._config?.max ?? DEFAULT_POWER_MAX;
+    return overMaxRatio(value, min, max);
   }
 
   private _syncLightningTheme(): void {
@@ -135,10 +160,7 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
   }
 
   private _targetIntensity(): number {
-    const entity = this._config?.entity;
-    const state = entity ? this.hass?.states[entity]?.state : undefined;
-    const value = parseNumericState(state);
-    return effectIntensity(value, this._config ?? {});
+    return effectIntensity(this._rawValue(), this._config ?? {});
   }
 
   private _tickIntensity(delta: number): number {
@@ -164,7 +186,7 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
     if (!this._renderer) {
       this._renderer = new PowerLightningRenderer(
         this,
-        () => this._buildArcs(),
+        (phase) => this._buildArcs(phase),
         () => this._lightningColor(),
         (delta) => {
           this._tickIntensity(delta);
@@ -175,7 +197,7 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
     this._renderer.attach(canvas);
   }
 
-  private _buildArcs(): LightningArc[] {
+  private _buildArcs(phase: number): LightningArc[] {
     const canvas = this._canvas;
     if (!canvas) {
       return [];
@@ -188,7 +210,25 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
       return [];
     }
 
-    return [{ from: plug, to: entity, intensity: this._displayIntensity }];
+    const color = this._lightningColor();
+    const severity = this._overMaxSeverity();
+    const arcs: LightningArc[] = [
+      { from: plug, to: entity, intensity: this._displayIntensity, color },
+    ];
+
+    if (severity > 0) {
+      appendChaoticArcs(
+        arcs,
+        plug,
+        canvas.clientWidth,
+        canvas.clientHeight,
+        severity,
+        phase,
+        color
+      );
+    }
+
+    return arcs;
   }
 
   protected render() {
@@ -207,8 +247,10 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
 
     const value = formatStateWithUnit(stateObj);
 
+    const overMax = this._overMaxSeverity() > 0;
+
     return html`
-      <ha-card>
+      <ha-card class=${overMax ? "over-max" : ""}>
         <div class="stage">
           <div class="content">
             ${stateObj
@@ -243,11 +285,17 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
       --lightning-glow: 0;
       display: block;
       height: 100%;
+      overflow: visible;
+      position: relative;
     }
 
     ha-card {
       height: 100%;
       overflow: hidden;
+    }
+
+    ha-card.over-max {
+      overflow: visible;
     }
 
     .stage {
@@ -319,10 +367,10 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
 
     canvas {
       position: absolute;
-      inset: 0;
+      inset: -28px;
       z-index: 1;
-      width: 100%;
-      height: 100%;
+      width: calc(100% + 56px);
+      height: calc(100% + 56px);
       display: block;
       pointer-events: none;
     }

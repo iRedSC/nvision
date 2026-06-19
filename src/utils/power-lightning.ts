@@ -92,6 +92,79 @@ export interface LightningArc {
   from: Point;
   to: Point;
   intensity: number;
+  color?: string;
+}
+
+export function isOverMax(
+  value: number | undefined,
+  min: number,
+  max: number
+): boolean {
+  return value !== undefined && max > min && value > max;
+}
+
+/** 0 when within range; 1 when one full span above max (capped at 2). */
+export function overMaxRatio(
+  value: number,
+  min: number,
+  max: number
+): number {
+  if (max <= min || value <= max) {
+    return 0;
+  }
+
+  return Math.min(2, (value - max) / (max - min));
+}
+
+export function peakOverMaxRatio(
+  values: (number | undefined)[],
+  config: PowerEffectsConfig
+): number {
+  const min = config.min ?? DEFAULT_POWER_MIN;
+  const max = config.max ?? DEFAULT_POWER_MAX;
+
+  return values.reduce(
+    (peak, value) =>
+      Math.max(peak, value !== undefined ? overMaxRatio(value, min, max) : 0),
+    0
+  );
+}
+
+export function resolveOverMaxColor(host: HTMLElement): string {
+  return readCssColor(host, "--error-color", "#f44336");
+}
+
+/** Wild bolts from an origin — severity scales count and reach. */
+export function appendChaoticArcs(
+  arcs: LightningArc[],
+  origin: Point,
+  width: number,
+  height: number,
+  severity: number,
+  phase: number,
+  color?: string
+): void {
+  if (severity <= 0 || width <= 0 || height <= 0) {
+    return;
+  }
+
+  const count = Math.min(8, Math.round(2 + severity * 5));
+  const reach = Math.max(width, height) * (0.55 + severity * 0.35);
+
+  for (let i = 0; i < count; i += 1) {
+    const angle =
+      seededRandom(Math.floor(phase * 4) + i * 17.3) * Math.PI * 2;
+    const radius = reach * (0.45 + seededRandom(phase + i * 3.7) * 0.55);
+    arcs.push({
+      from: origin,
+      to: {
+        x: origin.x + Math.cos(angle) * radius,
+        y: origin.y + Math.sin(angle) * radius,
+      },
+      intensity: Math.min(1.2, 0.6 + severity * 0.4),
+      color,
+    });
+  }
 }
 
 export function readCssColor(
@@ -285,7 +358,7 @@ export class PowerLightningRenderer {
   private _canvas?: HTMLCanvasElement;
   private _ctx?: CanvasRenderingContext2D;
   private _host: HTMLElement;
-  private _getArcs: () => LightningArc[];
+  private _getArcs: (phase: number) => LightningArc[];
   private _getColor: () => string;
   private _onFrame?: (delta: number) => void;
   private _frameId = 0;
@@ -296,7 +369,7 @@ export class PowerLightningRenderer {
 
   constructor(
     host: HTMLElement,
-    getArcs: () => LightningArc[],
+    getArcs: (phase: number) => LightningArc[],
     getColor: () => string,
     onFrame?: (delta: number) => void
   ) {
@@ -390,8 +463,7 @@ export class PowerLightningRenderer {
       return;
     }
 
-    const arcs = this._getArcs();
-    const maxIntensity = arcs.reduce(
+    const maxIntensity = this._getArcs(this._phase).reduce(
       (peak, arc) => Math.max(peak, arc.intensity),
       0
     );
@@ -400,6 +472,7 @@ export class PowerLightningRenderer {
     ctx.clearRect(0, 0, width, height);
 
     const color = this._getColor();
+    const arcs = this._getArcs(this._phase);
     for (const arc of arcs) {
       drawLightningArc(
         ctx,
@@ -407,7 +480,7 @@ export class PowerLightningRenderer {
         arc.to,
         arc.intensity,
         this._phase,
-        color
+        arc.color ?? color
       );
     }
   }
