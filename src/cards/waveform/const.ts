@@ -1,5 +1,6 @@
 import type {
   WaveformLayout,
+  WaveformMotion,
   WaveformShape,
 } from "./waveform-card-config";
 
@@ -14,7 +15,17 @@ export const DEFAULT_SHAKE_SPEED = 0.45;
 
 export const DEFAULT_LAYOUT: WaveformLayout = "line";
 export const DEFAULT_SIZE = "balanced" as const;
-export const DEFAULT_MOTION = "wave" as const;
+export const DEFAULT_MOTION = "surge" as const;
+
+/** @deprecated Legacy motion values mapped to new presets */
+export const LEGACY_MOTION_MAP: Record<string, WaveformMotion> = {
+  wave: "surge",
+  echo: "spawn",
+  pulse: "surge",
+  stream: "jet",
+  spectrum: "surge",
+  cascade: "spawn",
+};
 
 /** @deprecated Legacy shape values mapped to layout presets */
 export const LEGACY_SHAPE_TO_LAYOUT: Record<WaveformShape, WaveformLayout> = {
@@ -36,10 +47,7 @@ export const SIZE_OPTIONS = [
 ] as const;
 
 export const MOTION_OPTIONS = [
-  { value: "wave", label: "Wave" },
-  { value: "echo", label: "Echo" },
-  { value: "pulse", label: "Pulse" },
-  { value: "stream", label: "Stream" },
-  { value: "spectrum", label: "Spectrum" },
-  { value: "cascade", label: "Cascade" },
+  { value: "surge", label: "Surge" },
+  { value: "spawn", label: "Spawn" },
+  { value: "jet", label: "Jet stream" },
 ] as const;

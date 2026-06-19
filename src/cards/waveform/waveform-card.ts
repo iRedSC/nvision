@@ -370,39 +370,36 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     const waveColor = resolveWaveColor(this._config?.color, this);
     const scale = Math.min(width, height);
     const baseRadius = baseDotRadius(scale, presets.dotScale);
-    const variantCount = presets.dualLayer ? 2 : 1;
 
     ctx.clearRect(0, 0, width, height);
 
     for (let i = 0; i < this._dots.length; i += 1) {
-      for (let variant = 0; variant < variantCount; variant += 1) {
-        const params = computeDotDrawParams(
-          presets,
-          this._dots[i],
-          i,
-          this._dots.length,
-          this._phase,
-          Math.max(0.12, rawIntensity),
+      const params = computeDotDrawParams(
+        presets,
+        this._dots[i],
+        i,
+        this._dots.length,
+        this._phase,
+        Math.max(0.12, rawIntensity),
+        width,
+        height,
+        0
+      );
+
+      const fade =
+        edgeFade(
+          params.x,
+          params.y,
           width,
           height,
-          variant as 0 | 1
-        );
+          scale,
+          presets.layout
+        ) * contentFade(params.x, params.y, width, height);
+      const radius = baseRadius * params.radiusMul;
+      const alpha =
+        (0.34 + animIntensity * 0.5) * params.alphaMul * fade;
 
-        const fade =
-          edgeFade(
-            params.x,
-            params.y,
-            width,
-            height,
-            scale,
-            presets.layout
-          ) * contentFade(params.x, params.y, width, height);
-        const radius = baseRadius * params.radiusMul;
-        const alpha =
-          (0.34 + animIntensity * 0.5) * params.alphaMul * fade;
-
-        this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
-      }
+      this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
     }
   }
 

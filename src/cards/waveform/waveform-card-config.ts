@@ -3,13 +3,7 @@ import type { ConfigColor } from "../../utils/colors";
 
 export type WaveformLayout = "line" | "ring" | "field";
 export type WaveformSize = "compact" | "balanced" | "expansive";
-export type WaveformMotion =
-  | "wave"
-  | "pulse"
-  | "stream"
-  | "spectrum"
-  | "echo"
-  | "cascade";
+export type WaveformMotion = "spawn" | "jet" | "surge";
 
 /** @deprecated Use layout preset instead */
 export type WaveformShape = "line" | "circle" | "grid";
@@ -36,7 +30,7 @@ export interface WaveformCardConfig extends LovelaceCardConfig {
   dot_size?: number;
   /** @deprecated */
   dot_spacing?: number;
-  /** @deprecated Use motion: echo */
+  /** @deprecated Use motion: spawn */
   overlap_dots?: boolean;
   /** @deprecated */
   overlap_at?: number;

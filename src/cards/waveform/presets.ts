@@ -8,6 +8,7 @@ import {
   DEFAULT_LAYOUT,
   DEFAULT_MOTION,
   DEFAULT_SIZE,
+  LEGACY_MOTION_MAP,
   LEGACY_SHAPE_TO_LAYOUT,
 } from "./const";
 
@@ -24,7 +25,6 @@ export interface ResolvedPresets {
   dotScale: number;
   span: number;
   phaseSpeed: number;
-  dualLayer: boolean;
 }
 
 export interface DotDrawParams {
@@ -47,6 +47,15 @@ interface MotionInput {
   width: number;
   height: number;
   variant: 0 | 1;
+}
+
+interface AxisVectors {
+  primary: { x: number; y: number };
+  perp: { x: number; y: number };
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
 }
 
 const SIZE_PRESETS: Record<
@@ -82,94 +91,60 @@ function motionFrequency(intensity: number): number {
   return 0.42 + spread * 0.68;
 }
 
-function waveIndex(input: MotionInput): number {
+function motionAxes(input: MotionInput): AxisVectors {
   if (input.layout === "ring") {
-    return (input.index / input.count) * Math.PI * 2;
-  }
-  return input.index * 0.38;
-}
-
-function horizontalJitter(input: MotionInput): number {
-  const { phase, intensity, dot, variant } = input;
-  if (intensity <= 0.28) {
-    return 0;
+    const cx = input.width / 2;
+    const cy = input.height / 2;
+    const angle = Math.atan2(input.baseY - cy, input.baseX - cx);
+    return {
+      primary: { x: -Math.sin(angle), y: Math.cos(angle) },
+      perp: { x: Math.cos(angle), y: Math.sin(angle) },
+    };
   }
 
-  const spread = smoothstep(intensity);
-  const localPhase = (phase + variant * 1.2) * (1 + intensity * 0.15);
-  const localIndex = input.index + variant * 0.47;
-  const amp = input.width * spread * (0.04 + Math.max(0, intensity - 0.55) * 0.22);
-
-  return (
-    Math.sin(localPhase * (3.1 + dot.seed * 2.4) + localIndex * 0.85) * amp +
-    Math.cos(localPhase * (5.6 + localIndex * 0.35) + dot.phase) *
-      amp *
-      spread *
-      0.65
-  );
+  return {
+    primary: { x: 0, y: 1 },
+    perp: { x: 1, y: 0 },
+  };
 }
 
 function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: number } {
-  const { dot, index, phase, intensity, variant } = input;
+  const { dot, index, phase, intensity, variant, height } = input;
   if (intensity <= 0.38) {
     return { x, y };
   }
 
+  const axes = motionAxes(input);
   const localPhase = (phase + variant * 1.4) * (1 + intensity * 0.18);
   const localIndex = index + variant * 0.47;
   const disturb = intensity * intensity;
-  let ox = horizontalJitter(input);
-  let oy =
-    Math.sin(localPhase * (2.2 + dot.seed * 2) + localIndex * 1.15) *
-    input.height *
+
+  let perp =
+    Math.sin(localPhase * (3.1 + dot.seed * 2.4) + localIndex * 0.85) *
+    height *
     disturb *
-    0.14;
+    0.12;
 
   if (intensity > 0.45) {
     const chaos = (intensity - 0.45) ** 2;
-    oy += Math.sin(localPhase * 8.2 + localIndex * 2.1) * input.height * chaos * 0.2;
-    ox +=
+    perp +=
       Math.cos(localPhase * 7.4 + localIndex * 1.7 + dot.phase + variant) *
-      input.height *
+      height *
       chaos *
-      0.16;
+      0.18;
+    perp +=
+      Math.sin(localPhase * 8.2 + localIndex * 2.1) * height * chaos * 0.1;
   }
 
-  if (input.layout === "ring") {
-    const cx = input.width / 2;
-    const cy = input.height / 2;
-    const dx = x - cx;
-    const dy = y - cy;
-    const angle = Math.atan2(dy, dx);
-    const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
-    const radial = { x: Math.cos(angle), y: Math.sin(angle) };
-    return {
-      x: x + tangential.x * ox + radial.x * oy,
-      y: y + tangential.y * ox + radial.y * oy,
-    };
-  }
-
-  return { x: x + ox, y: y + oy };
+  return {
+    x: x + axes.perp.x * perp,
+    y: y + axes.perp.y * perp,
+  };
 }
 
-function adaptMotionToLayout(input: MotionInput, result: DotDrawParams): DotDrawParams {
-  let { x, y } = result;
-  const { layout, baseX, baseY, width, height } = input;
-
-  if (layout === "ring") {
-    const cx = width / 2;
-    const cy = height / 2;
-    const dx = x - baseX;
-    const dy = y - baseY;
-    const angle = Math.atan2(baseY - cy, baseX - cx);
-    const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
-    const radial = { x: Math.cos(angle), y: Math.sin(angle) };
-    x = baseX + tangential.x * dy + radial.x * dx;
-    y = baseY + tangential.y * dy + radial.y * dx;
-  }
-
-  ({ x, y } = applyChaos(input, x, y));
-  return { ...result, x, y };
+function withChaos(input: MotionInput, params: DotDrawParams): DotDrawParams {
+  const { x, y } = applyChaos(input, params.x, params.y);
+  return { ...params, x, y };
 }
 
 function resolveLayout(config: WaveformCardConfig): WaveformLayout {
@@ -204,11 +179,11 @@ function resolveSize(config: WaveformCardConfig): WaveformSize {
 
 function resolveMotion(config: WaveformCardConfig): WaveformMotion {
   if (config.motion) {
-    return config.motion;
+    return LEGACY_MOTION_MAP[config.motion] ?? config.motion;
   }
 
   if (config.overlap_dots) {
-    return "echo";
+    return "spawn";
   }
 
   return DEFAULT_MOTION;
@@ -228,7 +203,6 @@ export function resolvePresets(config: WaveformCardConfig): ResolvedPresets {
     dotScale: sizePreset.dotScale,
     span: sizePreset.span,
     phaseSpeed: sizePreset.phaseSpeed,
-    dualLayer: motion === "echo",
   };
 }
 
@@ -296,120 +270,122 @@ function basePosition(
   }
 }
 
-function waveMotion(input: MotionInput): DotDrawParams {
-  const { phase, intensity, height, baseX, baseY, variant } = input;
-  const amp = motionAmplitude(intensity, height);
+function spawnMotion(input: MotionInput): DotDrawParams {
+  const { dot, phase, intensity, height, width, baseX, baseY, layout } = input;
   const spread = smoothstep(intensity);
-  const localPhase = phase + variant * 1.85;
-  const index = waveIndex(input);
-  const freq = motionFrequency(intensity);
-  const wave =
-    Math.sin(localPhase * freq - index) * amp +
-    Math.sin(localPhase * freq * 0.5 - index * 0.5) * amp * spread * 0.55;
+  const period = 3.2 - spread * 1.1;
+  const speed = 0.55 + spread * 0.85;
+  const life = fract(phase * speed * 0.14 + dot.seed * period);
+  const fade = Math.sin(life * Math.PI);
+  const travel = motionAmplitude(intensity, height) * life * 1.15;
 
-  return {
-    x: baseX,
-    y: baseY + wave,
-    radiusMul: 0.88 + spread * 0.32,
-    alphaMul: 0.72 + spread * 0.3,
-  };
-}
-
-function pulseMotion(input: MotionInput): DotDrawParams {
-  const { dot, index, phase, intensity, baseX, baseY, variant } = input;
-  const spread = smoothstep(intensity);
-  const group = Math.floor(index / 4);
-  const breathe = Math.sin(phase * 0.75 + group * 1.15 + variant * 0.6);
-  const bob =
-    Math.sin(phase + dot.seed * 6.28) * input.height * 0.04 * (0.5 + spread * 0.65);
-
-  return {
-    x: baseX,
-    y: baseY + bob,
-    radiusMul: 0.72 + (0.28 + spread * 0.45) * (0.5 + breathe * 0.5),
-    alphaMul: 0.55 + (0.25 + spread * 0.35) * (0.5 + breathe * 0.5),
-  };
-}
-
-function streamMotion(input: MotionInput): DotDrawParams {
-  const { phase, intensity, height, baseX, baseY, variant } = input;
-  const spread = smoothstep(intensity);
-  const amp = motionAmplitude(intensity, height);
-  const localPhase = phase + variant * 1.2;
-  const index = waveIndex(input);
-  const freq = motionFrequency(intensity);
-  const drift =
-    Math.sin(localPhase * freq * 0.58 + index * 0.35) * amp * (0.75 + spread * 0.85);
-  const ripple = Math.sin(localPhase * freq - index) * amp * 0.65;
-
-  return {
-    x: baseX + drift,
-    y: baseY + ripple,
-    radiusMul: 0.86 + spread * 0.26,
-    alphaMul: 0.68 + spread * 0.3,
-  };
-}
-
-function spectrumMotion(input: MotionInput): DotDrawParams {
-  const { dot, index, phase, intensity, height, baseX, baseY } = input;
-  const spread = smoothstep(intensity);
-  const amp = height * (0.14 + spread * 0.34);
-  const bar =
-    (Math.sin(phase * 0.9 + dot.seed * 8.4) * 0.55 +
-      Math.sin(phase * 1.7 + index * 0.42 + dot.phase) * 0.45 +
-      1) *
-    0.5;
-  const heightOffset = bar * amp * (0.35 + spread * 1.05);
-
-  return {
-    x: baseX,
-    y: baseY - heightOffset,
-    radiusMul: 0.78 + bar * spread * 0.35,
-    alphaMul: 0.58 + bar * spread * 0.38,
-  };
-}
-
-function echoMotion(input: MotionInput): DotDrawParams {
-  const result = waveMotion(input);
-  if (input.variant) {
-    return {
-      ...result,
-      radiusMul: result.radiusMul * 0.9,
-      alphaMul: result.alphaMul * 0.62,
-    };
+  if (layout === "ring") {
+    const cx = width / 2;
+    const cy = height / 2;
+    const angle = Math.atan2(baseY - cy, baseX - cx);
+    const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
+    const radial = { x: Math.cos(angle), y: Math.sin(angle) };
+    const drift = travel * (0.35 + dot.seed * 0.4);
+    return withChaos(input, {
+      x: baseX + tangential.x * drift + radial.x * drift * 0.15,
+      y: baseY + tangential.y * drift + radial.y * drift * 0.15,
+      radiusMul: 0.7 + fade * spread * 0.45,
+      alphaMul: fade * (0.35 + spread * 0.55),
+    });
   }
-  return result;
+
+  const axes = motionAxes(input);
+  const drift = travel * (0.4 + dot.seed * 0.35);
+  return withChaos(input, {
+    x: baseX + axes.primary.x * drift * 0.2 + axes.perp.x * drift * 0.08,
+    y: baseY + axes.primary.y * drift,
+    radiusMul: 0.68 + fade * spread * 0.42,
+    alphaMul: fade * (0.32 + spread * 0.58),
+  });
 }
 
-function cascadeMotion(input: MotionInput): DotDrawParams {
-  const { index, count, phase, intensity, baseX, baseY, variant } = input;
+function jetMotion(input: MotionInput): DotDrawParams {
+  const { dot, index, count, phase, intensity, height, width, baseY, layout } =
+    input;
   const spread = smoothstep(intensity);
-  const amp = motionAmplitude(intensity, input.height);
-  const t = count <= 1 ? 1 : index / (count - 1);
-  const localPhase = phase + variant * 1.4;
-  const waveIdx = waveIndex(input);
-  const freq = motionFrequency(intensity);
-  const ripple = Math.sin(localPhase * freq * 1.1 - waveIdx * 1.5) * amp;
-  const build = 0.45 + t * (0.55 + spread * 0.4);
+  const speed = 0.28 + spread * 0.55;
+  const wobble = Math.sin(phase * 1.4 + dot.seed * 6.28) * height * 0.04 * spread;
 
-  return {
+  if (layout === "ring") {
+    const cx = width / 2;
+    const cy = height / 2;
+    const baseAngle =
+      (index / count) * Math.PI * 2 - Math.PI / 2 + dot.seed * 0.35;
+    const angle = baseAngle + phase * speed * 0.22 * (1 + spread * 0.6);
+    const pad = Math.min(width, height) * 0.06;
+    const radius = Math.min(width, height) / 2 - pad;
+    return withChaos(input, {
+      x: cx + Math.cos(angle) * radius,
+      y: cy + Math.sin(angle) * radius,
+      radiusMul: 0.82 + spread * 0.22,
+      alphaMul: 0.55 + spread * 0.38,
+    });
+  }
+
+  const bleed = width * 0.08;
+  const lane = baseY + wobble;
+  const x =
+    fract(phase * speed * 0.16 + dot.seed + index * 0.07) * (width + bleed * 2) -
+    bleed;
+
+  return withChaos(input, {
+    x,
+    y: lane,
+    radiusMul: 0.78 + spread * 0.28,
+    alphaMul: 0.5 + spread * 0.42,
+  });
+}
+
+function surgeMotion(input: MotionInput): DotDrawParams {
+  const { index, count, phase, intensity, height, baseX, baseY, layout } =
+    input;
+  const spread = smoothstep(intensity);
+  const amp = motionAmplitude(intensity, height);
+  const freq = motionFrequency(intensity);
+  const fromTop = index % 2 === 0;
+  const columnPhase =
+    phase * freq - (index / Math.max(1, count - 1)) * Math.PI * 1.6;
+  const pulse = Math.sin(columnPhase) * 0.5 + 0.5;
+  const travel = amp * (0.25 + pulse * (0.55 + spread * 0.65));
+  const inset = height * 0.06;
+
+  if (layout === "ring") {
+    const cx = input.width / 2;
+    const cy = input.height / 2;
+    const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
+    const radial = fromTop ? -1 : 1;
+    const baseRadius = Math.hypot(baseX - cx, baseY - cy);
+    const r = baseRadius + radial * travel * 0.85;
+    return withChaos(input, {
+      x: cx + Math.cos(angle) * r,
+      y: cy + Math.sin(angle) * r,
+      radiusMul: 0.74 + pulse * spread * 0.38,
+      alphaMul: 0.48 + pulse * spread * 0.46,
+    });
+  }
+
+  const y = fromTop ? inset + travel : height - inset - travel;
+
+  return withChaos(input, {
     x: baseX,
-    y: baseY + ripple * build,
-    radiusMul: 0.82 + spread * 0.28 * build,
-    alphaMul: 0.64 + spread * 0.34 * build,
-  };
+    y,
+    radiusMul: 0.72 + pulse * spread * 0.36,
+    alphaMul: 0.46 + pulse * spread * 0.48,
+  });
 }
 
 const MOTION_ENGINES: Record<
   WaveformMotion,
   (input: MotionInput) => DotDrawParams
 > = {
-  wave: waveMotion,
-  pulse: pulseMotion,
-  stream: streamMotion,
-  spectrum: spectrumMotion,
-  echo: echoMotion,
-  cascade: cascadeMotion,
+  spawn: spawnMotion,
+  jet: jetMotion,
+  surge: surgeMotion,
 };
 
 export function computeDotDrawParams(
@@ -433,9 +409,7 @@ export function computeDotDrawParams(
     presets.span,
     intensity
   );
-  const motion = MOTION_ENGINES[presets.motion];
-
-  const result = motion({
+  const motionInput: MotionInput = {
     dot,
     index,
     count,
@@ -448,25 +422,9 @@ export function computeDotDrawParams(
     height,
     variant,
     layout: presets.layout,
-  });
+  };
 
-  return adaptMotionToLayout(
-    {
-      dot,
-      index,
-      count,
-      phase,
-      intensity,
-      scale,
-      baseX: base.x,
-      baseY: base.y,
-      width,
-      height,
-      variant,
-      layout: presets.layout,
-    },
-    result
-  );
+  return MOTION_ENGINES[presets.motion](motionInput);
 }
 
 export function contentFade(
