@@ -14,23 +14,26 @@ import {
   responsiveTileInfoStyles,
   responsiveTypeStyles,
 } from "../../utils/responsive-type";
-import type { WaveformCardConfig, WaveformShape } from "./waveform-card-config";
+import type { WaveformCardConfig } from "./waveform-card-config";
 import {
-  DEFAULT_DOT_COUNT,
-  DEFAULT_DOT_SIZE,
-  DEFAULT_DOT_SPACING,
+  DEFAULT_LAYOUT,
   DEFAULT_MAX,
   DEFAULT_MIN,
-  DEFAULT_OVERLAP_AT,
-  DEFAULT_OVERLAP_DOTS,
-  DEFAULT_SHAPE,
+  DEFAULT_MOTION,
   DEFAULT_SHAKE_AT,
   DEFAULT_SHAKE_PEAK,
-  DEFAULT_WAVE_AMPLITUDE,
-  DEFAULT_WAVE_FREQUENCY,
+  DEFAULT_SIZE,
   WAVEFORM_CARD_EDITOR_NAME,
   WAVEFORM_CARD_NAME,
 } from "./const";
+import {
+  baseDotRadius,
+  buildDots,
+  computeDotDrawParams,
+  edgeFade,
+  resolvePresets,
+  type ScopeDot,
+} from "./presets";
 
 registerCustomCard({
   type: WAVEFORM_CARD_NAME,
@@ -39,17 +42,6 @@ registerCustomCard({
 });
 
 const INTENSITY_LERP = 0.1;
-
-interface ScopeDot {
-  phase: number;
-  freq: number;
-}
-
-interface LineLayout {
-  left: number;
-  right: number;
-  y: number;
-}
 
 function resolveWaveColor(
   configColor: WaveformCardConfig["color"],
@@ -73,343 +65,6 @@ function normalizeValue(value: number, min: number, max: number): number {
   }
 
   return Math.min(1, Math.max(0, (value - min) / (max - min)));
-}
-
-function smoothstep(value: number): number {
-  return value * value * (3 - 2 * value);
-}
-
-function buildDots(count: number): ScopeDot[] {
-  return Array.from({ length: count }, (_, index) => ({
-    phase: (index / count) * Math.PI * 2,
-    freq: 0.85 + (index % 7) * 0.11,
-  }));
-}
-
-function lineLayout(
-  width: number,
-  height: number,
-  intensity: number
-): LineLayout {
-  const scale = Math.min(width, height);
-  const pad = scale * 0.08;
-  const spread = smoothstep(intensity);
-
-  const left = pad;
-  const right = width - pad;
-  const quietY = height * 0.72;
-  const loudY = height * 0.48;
-  const y = quietY + (loudY - quietY) * spread;
-
-  return { left, right, y };
-}
-
-type MotionVariant = 0 | 1;
-
-function applyIntensityMotion(
-  dot: ScopeDot,
-  index: number,
-  phase: number,
-  intensity: number,
-  scale: number,
-  overlapAt: number,
-  x: number,
-  y: number,
-  waveAmplitude: number,
-  waveFrequency: number,
-  motionVariant: MotionVariant = 0
-): { x: number; y: number } {
-  const localPhase = (phase + motionVariant * 1.85) * waveFrequency;
-  const localIndex = index + motionVariant * 0.47;
-  const sway = scale * (0.018 + intensity * 0.11) * waveAmplitude;
-  y += Math.sin(localPhase * 1.05 + localIndex * 0.72) * sway;
-
-  if (intensity > 0.04) {
-    const disturb = intensity * intensity;
-    y +=
-      Math.sin(localPhase * (2.2 + dot.freq) + localIndex * 1.15) *
-        scale *
-        disturb *
-        0.09 *
-        waveAmplitude +
-      Math.cos(localPhase * (4.4 + dot.freq * 0.6) + dot.phase + motionVariant) *
-        scale *
-        disturb *
-        0.06 *
-        waveAmplitude;
-
-    if (intensity >= overlapAt) {
-      x +=
-        Math.sin(localPhase * (3.1 + dot.freq) + localIndex * 0.85) *
-          scale *
-          disturb *
-          0.07 *
-          waveAmplitude +
-        Math.cos(localPhase * (5.6 + localIndex * 0.35) + dot.phase + motionVariant) *
-          scale *
-          disturb *
-          0.05 *
-          waveAmplitude;
-    }
-  }
-
-  if (intensity > 0.45) {
-    const chaos = (intensity - 0.45) * (intensity - 0.45);
-    y += Math.sin(localPhase * 8.2 + localIndex * 2.1) * scale * chaos * 0.12 * waveAmplitude;
-    x +=
-      Math.cos(localPhase * 7.4 + localIndex * 1.7 + dot.phase + motionVariant) *
-      scale *
-      chaos *
-      0.1 *
-      waveAmplitude;
-  }
-
-  if (motionVariant) {
-    const spread = scale * 0.012 * waveAmplitude;
-    x += Math.cos(dot.phase * 1.7 + localPhase * 0.4) * spread;
-    y += Math.sin(dot.phase * 2.3 + localPhase * 0.35) * spread;
-  }
-
-  return { x, y };
-}
-
-function clampPosition(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  scale: number
-): { x: number; y: number } {
-  return {
-    x: Math.max(scale * 0.04, Math.min(width - scale * 0.04, x)),
-    y: Math.max(scale * 0.08, Math.min(height - scale * 0.08, y)),
-  };
-}
-
-function dotPositionLine(
-  dot: ScopeDot,
-  index: number,
-  count: number,
-  phase: number,
-  intensity: number,
-  layout: LineLayout,
-  width: number,
-  height: number,
-  spacing: number,
-  overlapAt: number,
-  waveAmplitude: number,
-  waveFrequency: number,
-  motionVariant: MotionVariant = 0
-): { x: number; y: number } {
-  const scale = Math.min(width, height);
-  const t = count <= 1 ? 0.5 : index / (count - 1);
-  const span = (layout.right - layout.left) * Math.min(spacing, 1.75);
-  const start = (layout.left + layout.right - span) / 2;
-
-  let { x, y } = applyIntensityMotion(
-    dot,
-    index,
-    phase,
-    intensity,
-    scale,
-    overlapAt,
-    start + t * span,
-    layout.y,
-    waveAmplitude,
-    waveFrequency,
-    motionVariant
-  );
-
-  return clampPosition(x, y, width, height, scale);
-}
-
-function dotPositionCircle(
-  dot: ScopeDot,
-  index: number,
-  count: number,
-  phase: number,
-  intensity: number,
-  width: number,
-  height: number,
-  spacing: number,
-  overlapAt: number,
-  waveAmplitude: number,
-  waveFrequency: number,
-  motionVariant: MotionVariant = 0
-): { x: number; y: number } {
-  const scale = Math.min(width, height);
-  const cx = width / 2;
-  const cy = height / 2;
-  const pad = scale * 0.14;
-  const baseRadius = (Math.min(width, height) / 2 - pad) * spacing;
-  const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
-  const localPhase = (phase + motionVariant * 1.85) * waveFrequency;
-  const localIndex = index + motionVariant * 0.47;
-
-  let radius = baseRadius;
-  let angleOffset = 0;
-
-  if (intensity > 0.04) {
-    const disturb = intensity * intensity;
-    radius +=
-      Math.sin(localPhase * (2.2 + dot.freq) + localIndex * 1.15) *
-      scale *
-      disturb *
-      0.06 *
-      waveAmplitude;
-    angleOffset +=
-      Math.sin(localPhase * (3.1 + dot.freq) + localIndex * 0.85) * disturb * 0.15 * waveAmplitude;
-
-    if (intensity >= overlapAt) {
-      radius +=
-        Math.cos(localPhase * (5.6 + localIndex * 0.35) + dot.phase + motionVariant) *
-        scale *
-        disturb *
-        0.05 *
-        waveAmplitude;
-      angleOffset +=
-        Math.cos(localPhase * (4.4 + dot.freq * 0.6) + dot.phase + motionVariant) *
-        disturb *
-        0.12 *
-        waveAmplitude;
-    }
-  }
-
-  if (intensity > 0.45) {
-    const chaos = (intensity - 0.45) * (intensity - 0.45);
-    radius += Math.sin(localPhase * 8.2 + localIndex * 2.1) * scale * chaos * 0.1 * waveAmplitude;
-    angleOffset +=
-      Math.cos(localPhase * 7.4 + localIndex * 1.7 + motionVariant) * chaos * 0.2 * waveAmplitude;
-  }
-
-  const a = angle + angleOffset;
-  let x = cx + Math.cos(a) * radius;
-  let y = cy + Math.sin(a) * radius;
-
-  ({ x, y } = applyIntensityMotion(
-    dot,
-    index,
-    phase,
-    intensity * 0.35,
-    scale,
-    overlapAt,
-    x,
-    y,
-    waveAmplitude,
-    waveFrequency,
-    motionVariant
-  ));
-
-  return clampPosition(x, y, width, height, scale);
-}
-
-function dotPositionGrid(
-  dot: ScopeDot,
-  index: number,
-  count: number,
-  phase: number,
-  intensity: number,
-  width: number,
-  height: number,
-  spacing: number,
-  overlapAt: number,
-  waveAmplitude: number,
-  waveFrequency: number,
-  motionVariant: MotionVariant = 0
-): { x: number; y: number } {
-  const scale = Math.min(width, height);
-  const cols = Math.ceil(Math.sqrt(count));
-  const rows = Math.ceil(count / cols);
-  const col = index % cols;
-  const row = Math.floor(index / cols);
-
-  const padX = scale * 0.08;
-  const padY = scale * 0.08;
-  const gap = scale * 0.035 * spacing;
-  const cellW = (width - 2 * padX - gap * (cols - 1)) / cols;
-  const cellH = (height - 2 * padY - gap * (rows - 1)) / rows;
-
-  let { x, y } = applyIntensityMotion(
-    dot,
-    index,
-    phase,
-    intensity,
-    scale,
-    overlapAt,
-    padX + col * (cellW + gap) + cellW / 2,
-    padY + row * (cellH + gap) + cellH / 2,
-    waveAmplitude,
-    waveFrequency,
-    motionVariant
-  );
-
-  return clampPosition(x, y, width, height, scale);
-}
-
-function dotPosition(
-  shape: WaveformShape,
-  dot: ScopeDot,
-  index: number,
-  count: number,
-  phase: number,
-  intensity: number,
-  layout: LineLayout,
-  width: number,
-  height: number,
-  spacing: number,
-  overlapAt: number,
-  waveAmplitude: number,
-  waveFrequency: number,
-  motionVariant: MotionVariant = 0
-): { x: number; y: number } {
-  switch (shape) {
-    case "circle":
-      return dotPositionCircle(
-        dot,
-        index,
-        count,
-        phase,
-        intensity,
-        width,
-        height,
-        spacing,
-        overlapAt,
-        waveAmplitude,
-        waveFrequency,
-        motionVariant
-      );
-    case "grid":
-      return dotPositionGrid(
-        dot,
-        index,
-        count,
-        phase,
-        intensity,
-        width,
-        height,
-        spacing,
-        overlapAt,
-        waveAmplitude,
-        waveFrequency,
-        motionVariant
-      );
-    default:
-      return dotPositionLine(
-        dot,
-        index,
-        count,
-        phase,
-        intensity,
-        layout,
-        width,
-        height,
-        spacing,
-        overlapAt,
-        waveAmplitude,
-        waveFrequency,
-        motionVariant
-      );
-  }
 }
 
 @customElement(WAVEFORM_CARD_NAME)
@@ -439,16 +94,9 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       entity,
       min: DEFAULT_MIN,
       max: DEFAULT_MAX,
-      shape: DEFAULT_SHAPE,
-      dot_count: DEFAULT_DOT_COUNT,
-      dot_size: DEFAULT_DOT_SIZE,
-      dot_spacing: DEFAULT_DOT_SPACING,
-      overlap_dots: DEFAULT_OVERLAP_DOTS,
-      overlap_at: DEFAULT_OVERLAP_AT,
-      shake_at: DEFAULT_SHAKE_AT,
-      shake_peak: DEFAULT_SHAKE_PEAK,
-      wave_amplitude: DEFAULT_WAVE_AMPLITUDE,
-      wave_frequency: DEFAULT_WAVE_FREQUENCY,
+      layout: DEFAULT_LAYOUT,
+      size: DEFAULT_SIZE,
+      motion: DEFAULT_MOTION,
     };
   }
 
@@ -465,66 +113,36 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   private _phase = 0;
   private _displayIntensity = 0;
   private _targetIntensity = 0;
-  private _dots: ScopeDot[] = buildDots(DEFAULT_DOT_COUNT);
+  private _dots: ScopeDot[] = buildDots(24);
   private _resizeObserver?: ResizeObserver;
 
   public setConfig(config: WaveformCardConfig): void {
     this._config = {
       min: DEFAULT_MIN,
       max: DEFAULT_MAX,
-      shape: DEFAULT_SHAPE,
-      dot_count: DEFAULT_DOT_COUNT,
-      dot_size: DEFAULT_DOT_SIZE,
-      dot_spacing: DEFAULT_DOT_SPACING,
-      overlap_dots: DEFAULT_OVERLAP_DOTS,
-      overlap_at: DEFAULT_OVERLAP_AT,
+      layout: DEFAULT_LAYOUT,
+      size: DEFAULT_SIZE,
+      motion: DEFAULT_MOTION,
       shake_at: DEFAULT_SHAKE_AT,
       shake_peak: DEFAULT_SHAKE_PEAK,
-      wave_amplitude: DEFAULT_WAVE_AMPLITUDE,
-      wave_frequency: DEFAULT_WAVE_FREQUENCY,
       ...config,
     };
     this._syncDots();
   }
 
-  private _waveOptions(): { amplitude: number; frequency: number } {
-    return {
-      amplitude: this._config?.wave_amplitude ?? DEFAULT_WAVE_AMPLITUDE,
-      frequency: this._config?.wave_frequency ?? DEFAULT_WAVE_FREQUENCY,
-    };
-  }
-
-  private _layoutOptions(): {
-    shape: WaveformShape;
-    dotCount: number;
-    dotSize: number;
-    dotSpacing: number;
-  } {
-    return {
-      shape: this._config?.shape ?? DEFAULT_SHAPE,
-      dotCount: Math.min(
-        64,
-        Math.max(4, Math.round(this._config?.dot_count ?? DEFAULT_DOT_COUNT))
-      ),
-      dotSize: this._config?.dot_size ?? DEFAULT_DOT_SIZE,
-      dotSpacing: this._config?.dot_spacing ?? DEFAULT_DOT_SPACING,
-    };
+  private _presets() {
+    return resolvePresets(this._config ?? {});
   }
 
   private _syncDots(): void {
-    const { dotCount } = this._layoutOptions();
+    const { dotCount } = this._presets();
     if (this._dots.length !== dotCount) {
       this._dots = buildDots(dotCount);
     }
   }
 
-  private _effectThresholds(): {
-    overlapAt: number;
-    shakeAt: number;
-    shakePeak: number;
-  } {
+  private _shakeThresholds(): { shakeAt: number; shakePeak: number } {
     return {
-      overlapAt: this._config?.overlap_at ?? DEFAULT_OVERLAP_AT,
       shakeAt: this._config?.shake_at ?? DEFAULT_SHAKE_AT,
       shakePeak: this._config?.shake_peak ?? DEFAULT_SHAKE_PEAK,
     };
@@ -655,19 +273,18 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       this._displayIntensity += diff * INTENSITY_LERP * delta;
     }
 
-    return this._displayIntensity;
+    return Math.max(0.12, this._displayIntensity);
   }
 
   private _applyShake(intensity: number): void {
-    const { shakeAt, shakePeak } = this._effectThresholds();
+    const { shakeAt, shakePeak } = this._shakeThresholds();
 
     if (intensity < shakeAt) {
       this.style.transform = "";
       return;
     }
 
-    const amount =
-      ((intensity - shakeAt) / (1 - shakeAt)) * shakePeak;
+    const amount = ((intensity - shakeAt) / (1 - shakeAt)) * shakePeak;
     const x =
       Math.sin(this._phase * 14.3) * amount * 2.4 +
       Math.cos(this._phase * 19.7) * amount * 1.2;
@@ -687,17 +304,25 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     color: string,
     alpha: number
   ): void {
+    if (alpha <= 0.01) {
+      return;
+    }
+
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = radius * 2.4;
     ctx.beginPath();
-    ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2);
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fillStyle = color;
-    ctx.globalAlpha = alpha * 0.12;
+    ctx.globalAlpha = alpha * 0.35;
     ctx.fill();
+    ctx.restore();
 
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
     ctx.globalAlpha = alpha;
     ctx.fill();
-
     ctx.globalAlpha = 1;
   }
 
@@ -716,48 +341,38 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
     this._syncIntensity();
     const intensity = this._tickIntensity(delta);
-    const { amplitude, frequency } = this._waveOptions();
-    this._phase += delta * (0.045 + intensity * 0.12) * frequency;
+    const presets = this._presets();
+    this._phase +=
+      delta * (0.04 + intensity * 0.1) * presets.phaseSpeed;
     this._applyShake(intensity);
 
     const waveColor = resolveWaveColor(this._config?.color, this);
-    const { overlapAt } = this._effectThresholds();
-    const { shape, dotSize, dotSpacing } = this._layoutOptions();
     const scale = Math.min(width, height);
-    const baseRadius =
-      Math.max(1.05, scale * 0.0115) * Math.max(0.25, dotSize);
-    const layout = lineLayout(width, height, intensity);
+    const baseRadius = baseDotRadius(scale, presets.dotScale);
+    const variantCount = presets.dualLayer ? 2 : 1;
 
     ctx.clearRect(0, 0, width, height);
 
-    const overlapDots = this._config?.overlap_dots ?? DEFAULT_OVERLAP_DOTS;
-    const variantCount = overlapDots ? 2 : 1;
-
     for (let i = 0; i < this._dots.length; i += 1) {
       for (let variant = 0; variant < variantCount; variant += 1) {
-        const motionVariant = variant as MotionVariant;
-        const { x, y } = dotPosition(
-          shape,
+        const params = computeDotDrawParams(
+          presets,
           this._dots[i],
           i,
           this._dots.length,
           this._phase,
           intensity,
-          layout,
           width,
           height,
-          dotSpacing,
-          overlapAt,
-          amplitude,
-          frequency,
-          motionVariant
+          variant as 0 | 1
         );
 
-        const radius =
-          baseRadius * (0.85 + intensity * 0.35) * (motionVariant ? 0.92 : 1);
-        const alpha = (0.32 + intensity * 0.5) * (motionVariant ? 0.78 : 1);
+        const fade = edgeFade(params.x, params.y, width, height, scale);
+        const radius = baseRadius * params.radiusMul;
+        const alpha =
+          (0.34 + intensity * 0.46) * params.alphaMul * fade;
 
-        this._drawDot(ctx, x, y, radius, waveColor, alpha);
+        this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
       }
     }
   }
@@ -793,7 +408,9 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
               .secondary=${name}
             ></ha-tile-info>
           </div>
-          <canvas aria-hidden="true"></canvas>
+          <div class="waveform-zone">
+            <canvas aria-hidden="true"></canvas>
+          </div>
         </div>
       </ha-card>
     `;
@@ -823,12 +440,14 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
     .content {
       position: relative;
-      z-index: 0;
+      z-index: 1;
       display: flex;
       align-items: center;
       gap: 10px;
       padding: 10px;
       box-sizing: border-box;
+      width: 46%;
+      max-width: 220px;
       height: 100%;
       min-height: 56px;
     }
@@ -843,10 +462,17 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       flex: 1;
     }
 
+    .waveform-zone {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: 54%;
+      overflow: hidden;
+      z-index: 0;
+    }
+
     canvas {
       position: absolute;
       inset: 0;
-      z-index: 1;
       width: 100%;
       height: 100%;
       display: block;

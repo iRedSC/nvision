@@ -5,18 +5,14 @@ import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
 import type { WaveformCardConfig } from "./waveform-card-config";
 import {
-  DEFAULT_DOT_COUNT,
-  DEFAULT_DOT_SIZE,
-  DEFAULT_DOT_SPACING,
+  DEFAULT_LAYOUT,
   DEFAULT_MAX,
   DEFAULT_MIN,
-  DEFAULT_OVERLAP_AT,
-  DEFAULT_OVERLAP_DOTS,
-  DEFAULT_SHAPE,
-  DEFAULT_SHAKE_AT,
-  DEFAULT_SHAKE_PEAK,
-  DEFAULT_WAVE_AMPLITUDE,
-  DEFAULT_WAVE_FREQUENCY,
+  DEFAULT_MOTION,
+  DEFAULT_SIZE,
+  LAYOUT_OPTIONS,
+  MOTION_OPTIONS,
+  SIZE_OPTIONS,
   WAVEFORM_CARD_EDITOR_NAME,
 } from "./const";
 
@@ -43,86 +39,43 @@ const SCHEMA: HaFormSchema[] = [
   },
   { name: "color", selector: { color_rgb: {} } },
   {
-    name: "shape",
+    type: "grid",
+    name: "",
+    schema: [
+      {
+        name: "layout",
+        required: true,
+        default: DEFAULT_LAYOUT,
+        selector: {
+          select: {
+            options: [...LAYOUT_OPTIONS],
+            mode: "dropdown",
+          },
+        },
+      },
+      {
+        name: "size",
+        required: true,
+        default: DEFAULT_SIZE,
+        selector: {
+          select: {
+            options: [...SIZE_OPTIONS],
+            mode: "dropdown",
+          },
+        },
+      },
+    ],
+  },
+  {
+    name: "motion",
     required: true,
-    default: DEFAULT_SHAPE,
+    default: DEFAULT_MOTION,
     selector: {
       select: {
-        options: [
-          { value: "line", label: "Line" },
-          { value: "circle", label: "Circle" },
-          { value: "grid", label: "Grid" },
-        ],
+        options: [...MOTION_OPTIONS],
         mode: "dropdown",
       },
     },
-  },
-  {
-    type: "grid",
-    name: "",
-    schema: [
-      {
-        name: "dot_count",
-        required: true,
-        default: DEFAULT_DOT_COUNT,
-        selector: { number: { min: 4, max: 64, step: 1 } },
-      },
-      {
-        name: "dot_size",
-        required: true,
-        default: DEFAULT_DOT_SIZE,
-        selector: { number: { min: 0.25, max: 3, step: 0.05 } },
-      },
-      {
-        name: "dot_spacing",
-        required: true,
-        default: DEFAULT_DOT_SPACING,
-        selector: { number: { min: 0.5, max: 2, step: 0.05 } },
-      },
-    ],
-  },
-  {
-    type: "grid",
-    name: "",
-    schema: [
-      {
-        name: "wave_amplitude",
-        required: true,
-        default: DEFAULT_WAVE_AMPLITUDE,
-        selector: { number: { min: 0, max: 3, step: 0.05 } },
-      },
-      {
-        name: "wave_frequency",
-        required: true,
-        default: DEFAULT_WAVE_FREQUENCY,
-        selector: { number: { min: 0.1, max: 3, step: 0.05 } },
-      },
-    ],
-  },
-  { name: "overlap_dots", selector: { boolean: {} } },
-  {
-    type: "grid",
-    name: "",
-    schema: [
-      {
-        name: "overlap_at",
-        required: true,
-        default: DEFAULT_OVERLAP_AT,
-        selector: { number: { min: 0, max: 1, step: 0.01 } },
-      },
-      {
-        name: "shake_at",
-        required: true,
-        default: DEFAULT_SHAKE_AT,
-        selector: { number: { min: 0, max: 1, step: 0.01 } },
-      },
-    ],
-  },
-  {
-    name: "shake_peak",
-    required: true,
-    default: DEFAULT_SHAKE_PEAK,
-    selector: { number: { min: 0, max: 1, step: 0.01 } },
   },
 ];
 
@@ -137,16 +90,9 @@ export class NvisionWaveformCardEditor
     this._config = {
       min: DEFAULT_MIN,
       max: DEFAULT_MAX,
-      shape: DEFAULT_SHAPE,
-      dot_count: DEFAULT_DOT_COUNT,
-      dot_size: DEFAULT_DOT_SIZE,
-      dot_spacing: DEFAULT_DOT_SPACING,
-      overlap_dots: DEFAULT_OVERLAP_DOTS,
-      overlap_at: DEFAULT_OVERLAP_AT,
-      shake_at: DEFAULT_SHAKE_AT,
-      shake_peak: DEFAULT_SHAKE_PEAK,
-      wave_amplitude: DEFAULT_WAVE_AMPLITUDE,
-      wave_frequency: DEFAULT_WAVE_FREQUENCY,
+      layout: DEFAULT_LAYOUT,
+      size: DEFAULT_SIZE,
+      motion: DEFAULT_MOTION,
       ...config,
     };
   }
@@ -180,44 +126,16 @@ export class NvisionWaveformCardEditor
       return "Waveform color";
     }
 
-    if (schema.name === "shape") {
-      return "Shape";
+    if (schema.name === "layout") {
+      return "Layout";
     }
 
-    if (schema.name === "dot_count") {
-      return "Dot count";
+    if (schema.name === "size") {
+      return "Size";
     }
 
-    if (schema.name === "dot_size") {
-      return "Dot size";
-    }
-
-    if (schema.name === "dot_spacing") {
-      return "Dot spacing";
-    }
-
-    if (schema.name === "wave_amplitude") {
-      return "Wave amplitude";
-    }
-
-    if (schema.name === "wave_frequency") {
-      return "Wave frequency";
-    }
-
-    if (schema.name === "overlap_dots") {
-      return "Overlap dots";
-    }
-
-    if (schema.name === "overlap_at") {
-      return "Overlap threshold";
-    }
-
-    if (schema.name === "shake_at") {
-      return "Shake threshold";
-    }
-
-    if (schema.name === "shake_peak") {
-      return "Shake intensity";
+    if (schema.name === "motion") {
+      return "Motion";
     }
 
     return this.hass.localize(
