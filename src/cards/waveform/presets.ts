@@ -240,8 +240,8 @@ export function computeMotionActivity(
       );
     }
     case "spawn": {
-      const spawnRate = (0.55 + spread * 0.85) * 0.14 * shakeSpeed;
-      return Math.min(1, spread * 0.85 * spawnRate * 5.5 + rate * 0.9);
+      const spawnRate = (0.06 + spread * spread * 0.28) * shakeSpeed;
+      return Math.min(1, spread * spawnRate * 4.5 + rate * 0.75);
     }
     default:
       return Math.min(1, spread * spread * 1.05 * shakeSpeed + rate * 0.75);
@@ -308,22 +308,24 @@ function basePosition(
 function spawnMotion(input: MotionInput): DotDrawParams {
   const { dot, phase, intensity, height, width, baseX, baseY, layout } = input;
   const spread = smoothstep(intensity);
-  const period = 3.2 - spread * 1.1;
-  const speed = 0.55 + spread * 0.85;
-  const life = fract(phase * speed * 0.14 + dot.seed * period);
+  const speed = 0.05 + spread * spread * 1.15;
+  const period = 3.6 - spread * 1.4;
+  const life = fract(phase * speed * (0.06 + spread * 0.22) + dot.seed * period);
   const fade = Math.sin(life * Math.PI);
-  const travel = motionAmplitude(intensity, height) * life * 1.15;
+  const travel = motionAmplitude(intensity, height) * life * (0.85 + spread * 0.45);
   const direction = dot.sign;
 
   if (layout === "ring") {
     const cx = width / 2;
     const cy = height / 2;
     const angle = Math.atan2(baseY - cy, baseX - cx);
-    const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
-    const drift = travel * direction * (0.45 + dot.seed * 0.35);
+    const pad = Math.min(width, height) * 0.06;
+    const orbitRadius = Math.hypot(baseX - cx, baseY - cy);
+    const flySpan = orbitRadius * (0.18 + spread * 0.55);
+    const radius = Math.max(pad, orbitRadius + direction * life * flySpan);
     return withChaos(input, {
-      x: baseX + tangential.x * drift,
-      y: baseY + tangential.y * drift,
+      x: cx + Math.cos(angle) * radius,
+      y: cy + Math.sin(angle) * radius,
       radiusMul: 0.52 + fade * (0.65 + spread * 0.35),
       alphaMul: fade * (0.32 + spread * 0.58),
     });
@@ -343,9 +345,9 @@ function jetMotion(input: MotionInput): DotDrawParams {
   const { dot, index, count, phase, intensity, height, width, baseX, baseY, layout } =
     input;
   const spread = smoothstep(Math.max(0.1, intensity));
-  const baseSpeed = 0.14 + spread * 0.62;
+  const baseSpeed = 0.16 + spread * 0.78;
   const dotSpeed = baseSpeed * (0.4 + dot.seed * 1.35);
-  const primaryAmp = motionAmplitude(intensity, height) * (0.18 + spread * 0.72);
+  const primaryAmp = motionAmplitude(intensity, height) * (0.035 + spread * 0.1);
   const primaryWave =
     Math.sin(phase * (1.6 + dot.seed * 0.8) + dot.seed * 9.4) * primaryAmp;
   const speedNorm = dotSpeed / (baseSpeed * 1.75);
@@ -354,27 +356,27 @@ function jetMotion(input: MotionInput): DotDrawParams {
   if (layout === "ring") {
     const cx = width / 2;
     const cy = height / 2;
-    const baseAngle =
-      (index / count) * Math.PI * 2 - Math.PI / 2 + dot.seed * 0.35;
-    const angle = baseAngle + phase * dotSpeed * 0.28 * (0.85 + spread * 0.75);
     const pad = Math.min(width, height) * 0.06;
     const orbitRadius = Math.min(width, height) / 2 - pad;
-    const expandSpan = orbitRadius * (0.1 + spread * 0.26);
-    const outward = fract(phase * dotSpeed * 0.032 + dot.seed * 1.9);
-    const radius = orbitRadius + outward * expandSpan;
-    const outwardFade = 1 - outward * 0.35;
+    const angle =
+      (index / count) * Math.PI * 2 - Math.PI / 2 + dot.seed * 0.35;
+    const radialSpeed = 0.05 + spread * spread * 0.24;
+    const life = fract(phase * radialSpeed * dotSpeed + dot.seed * 2.6);
+    const flySpan = orbitRadius * (0.2 + spread * 0.75);
+    const radius = orbitRadius + life * flySpan;
+    const fade = 1 - life;
     return withChaos(input, {
       x: cx + Math.cos(angle) * radius,
       y: cy + Math.sin(angle) * radius,
-      radiusMul: radiusMul * (0.92 + outward * 0.18),
-      alphaMul: (0.46 + speedNorm * 0.22 + spread * 0.36) * outwardFade,
+      radiusMul: radiusMul * (0.88 + (1 - life) * 0.22),
+      alphaMul: (0.38 + speedNorm * 0.18 + spread * 0.32) * fade,
     });
   }
 
-  const bleed = width * 0.1;
+  const bleed = width * 0.12;
   const lane = baseY + primaryWave;
   const x =
-    fract(phase * dotSpeed * 0.2 + dot.seed * 2.1 + index * 0.04) *
+    fract(phase * dotSpeed * 0.32 + dot.seed * 2.1 + index * 0.04) *
       (width + bleed * 2) -
     bleed;
 
