@@ -93,6 +93,8 @@ export interface LightningArc {
   to: Point;
   intensity: number;
   color?: string;
+  /** Multiplier for stroke opacity (overflow arcs use a softer glow). */
+  alphaScale?: number;
 }
 
 export function isOverMax(
@@ -134,7 +136,33 @@ export function resolveOverMaxColor(host: HTMLElement): string {
   return readCssColor(host, "--error-color", "#f44336");
 }
 
-/** Wild bolts from an origin — severity scales count and reach. */
+/** Furthest distance from a point along a ray before leaving the canvas. */
+function rayMaxRadius(
+  origin: Point,
+  width: number,
+  height: number,
+  angle: number
+): number {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  let maxR = Infinity;
+
+  if (cos > 0.001) {
+    maxR = Math.min(maxR, (width - origin.x) / cos);
+  } else if (cos < -0.001) {
+    maxR = Math.min(maxR, -origin.x / cos);
+  }
+
+  if (sin > 0.001) {
+    maxR = Math.min(maxR, (height - origin.y) / sin);
+  } else if (sin < -0.001) {
+    maxR = Math.min(maxR, -origin.y / sin);
+  }
+
+  return Number.isFinite(maxR) ? Math.max(0, maxR) : 0;
+}
+
+/** Wild bolts from an origin — severity scales count, reach, and flicker. */
 export function appendChaoticArcs(
   arcs: LightningArc[],
   origin: Point,
@@ -148,20 +176,36 @@ export function appendChaoticArcs(
     return;
   }
 
-  const count = Math.min(8, Math.round(2 + severity * 5));
-  const reach = Math.max(width, height) * (0.55 + severity * 0.35);
+  const t = Math.min(1, severity / 2);
+  const count = Math.min(6, Math.max(1, Math.round(0.35 + t * 3.5)));
+
+  const lengthMin = 0.14;
+  const lengthMax = 1;
+  const lengthT = lengthMin + t * (lengthMax - lengthMin);
+  const flickerRate = 1.2 + t * 1.4;
+  const alphaScale = 0.48 + t * 0.28;
+  const intensity = Math.min(1, 0.22 + t * 0.58);
 
   for (let i = 0; i < count; i += 1) {
     const angle =
-      seededRandom(Math.floor(phase * 4) + i * 17.3) * Math.PI * 2;
-    const radius = reach * (0.45 + seededRandom(phase + i * 3.7) * 0.55);
+      seededRandom(Math.floor(phase * flickerRate) + i * 17.3) * Math.PI * 2;
+    const maxR = rayMaxRadius(origin, width, height, angle);
+    if (maxR < 6) {
+      continue;
+    }
+
+    const radius =
+      maxR *
+      lengthT *
+      (0.5 + seededRandom(phase + i * 3.7) * 0.5);
     arcs.push({
       from: origin,
       to: {
         x: origin.x + Math.cos(angle) * radius,
         y: origin.y + Math.sin(angle) * radius,
       },
-      intensity: Math.min(1.2, 0.6 + severity * 0.4),
+      intensity,
+      alphaScale,
       color,
     });
   }
@@ -318,18 +362,20 @@ function drawSingleBolt(
   to: Point,
   intensity: number,
   seed: number,
-  color: string
+  color: string,
+  alphaScale = 1
 ): void {
-  const drawIntensity = effectiveIntensity(intensity);
+  const cappedIntensity = Math.min(1, intensity);
+  const drawIntensity = effectiveIntensity(cappedIntensity);
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
   if (distance < 4) {
     return;
   }
 
   const segments = Math.min(14, Math.max(5, Math.round(distance / 14)));
-  const displacement = wiggleAmplitude(intensity, distance);
+  const displacement = wiggleAmplitude(cappedIntensity, distance);
   const points = zigzagPath(from, to, segments, displacement, seed);
-  const alpha = 0.5 + drawIntensity * 0.42;
+  const alpha = (0.5 + drawIntensity * 0.42) * alphaScale;
   const width = 1 + drawIntensity * 1.6;
   strokePolyline(ctx, points, color, alpha, width);
 }
@@ -340,7 +386,8 @@ export function drawLightningArc(
   to: Point,
   intensity: number,
   phase: number,
-  color: string
+  color: string,
+  alphaScale = 1
 ): void {
   if (intensity <= 0) {
     return;
@@ -351,7 +398,15 @@ export function drawLightningArc(
     return;
   }
 
-  drawSingleBolt(ctx, from, to, intensity, Math.floor(phase * 3), color);
+  drawSingleBolt(
+    ctx,
+    from,
+    to,
+    intensity,
+    Math.floor(phase * 3),
+    color,
+    alphaScale
+  );
 }
 
 export class PowerLightningRenderer {
@@ -463,8 +518,9 @@ export class PowerLightningRenderer {
       return;
     }
 
-    const maxIntensity = this._getArcs(this._phase).reduce(
-      (peak, arc) => Math.max(peak, arc.intensity),
+    const arcs = this._getArcs(this._phase);
+    const maxIntensity = arcs.reduce(
+      (peak, arc) => Math.max(peak, Math.min(1, arc.intensity)),
       0
     );
 
@@ -472,7 +528,6 @@ export class PowerLightningRenderer {
     ctx.clearRect(0, 0, width, height);
 
     const color = this._getColor();
-    const arcs = this._getArcs(this._phase);
     for (const arc of arcs) {
       drawLightningArc(
         ctx,
@@ -480,7 +535,8 @@ export class PowerLightningRenderer {
         arc.to,
         arc.intensity,
         this._phase,
-        arc.color ?? color
+        arc.color ?? color,
+        arc.alphaScale ?? 1
       );
     }
   }
