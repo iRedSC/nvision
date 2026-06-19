@@ -273,7 +273,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       this._displayIntensity += diff * INTENSITY_LERP * delta;
     }
 
-    return Math.max(0.12, this._displayIntensity);
+    return this._displayIntensity;
   }
 
   private _applyShake(intensity: number): void {
@@ -340,11 +340,16 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     this._syncIntensity();
-    const intensity = this._tickIntensity(delta);
+    const rawIntensity = this._tickIntensity(delta);
+    const animIntensity = Math.max(0.12, rawIntensity);
     const presets = this._presets();
+    const frenzy =
+      rawIntensity > DEFAULT_SHAKE_AT
+        ? 1 + (rawIntensity - DEFAULT_SHAKE_AT) * 2.2
+        : 1;
     this._phase +=
-      delta * (0.04 + intensity * 0.1) * presets.phaseSpeed;
-    this._applyShake(intensity);
+      delta * (0.045 + animIntensity * 0.13) * presets.phaseSpeed * frenzy;
+    this._applyShake(rawIntensity);
 
     const waveColor = resolveWaveColor(this._config?.color, this);
     const scale = Math.min(width, height);
@@ -361,16 +366,23 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
           i,
           this._dots.length,
           this._phase,
-          intensity,
+          Math.max(0.12, rawIntensity),
           width,
           height,
           variant as 0 | 1
         );
 
-        const fade = edgeFade(params.x, params.y, width, height, scale);
+        const fade = edgeFade(
+          params.x,
+          params.y,
+          width,
+          height,
+          scale,
+          presets.layout
+        );
         const radius = baseRadius * params.radiusMul;
         const alpha =
-          (0.34 + intensity * 0.46) * params.alphaMul * fade;
+          (0.34 + animIntensity * 0.5) * params.alphaMul * fade;
 
         this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
       }
@@ -433,9 +445,10 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     .stage {
-      position: relative;
+      display: flex;
+      flex-direction: column;
       height: 100%;
-      min-height: 56px;
+      min-height: 72px;
     }
 
     .content {
@@ -444,12 +457,10 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px;
+      padding: 10px 10px 4px;
       box-sizing: border-box;
-      width: 46%;
-      max-width: 220px;
-      height: 100%;
-      min-height: 56px;
+      width: 100%;
+      flex: none;
     }
 
     ha-state-icon {
@@ -463,11 +474,11 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     .waveform-zone {
-      position: absolute;
-      inset: 0 0 0 auto;
-      width: 54%;
+      position: relative;
+      flex: 1;
+      width: 100%;
+      min-height: 32px;
       overflow: hidden;
-      z-index: 0;
     }
 
     canvas {

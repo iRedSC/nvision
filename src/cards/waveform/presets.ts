@@ -35,6 +35,7 @@ export interface DotDrawParams {
 }
 
 interface MotionInput {
+  layout: WaveformLayout;
   dot: ScopeDot;
   index: number;
   count: number;
@@ -60,7 +61,7 @@ const SIZE_PRESETS: Record<
 const LAYOUT_DOT_COUNTS: Record<WaveformLayout, Record<WaveformSize, number>> =
   {
     line: { compact: 16, balanced: 24, expansive: 32 },
-    ring: { compact: 16, balanced: 20, expansive: 28 },
+    ring: { compact: 18, balanced: 24, expansive: 32 },
     field: { compact: 16, balanced: 25, expansive: 36 },
   };
 
@@ -70,7 +71,98 @@ function smoothstep(value: number): number {
 
 function motionAmplitude(intensity: number, scale: number): number {
   const spread = smoothstep(intensity);
-  return scale * (0.014 + spread * 0.1);
+  const surge = Math.max(0, intensity - 0.5) ** 2;
+  return scale * (0.016 + spread * 0.13 + surge * 0.16);
+}
+
+function waveIndex(input: MotionInput): number {
+  if (input.layout === "ring") {
+    return (input.index / input.count) * Math.PI * 2;
+  }
+  return input.index * 0.38;
+}
+
+function horizontalJitter(input: MotionInput): number {
+  const { phase, intensity, scale, dot, variant } = input;
+  if (intensity <= 0.28) {
+    return 0;
+  }
+
+  const spread = smoothstep(intensity);
+  const localPhase = (phase + variant * 1.2) * (1 + intensity * 0.15);
+  const localIndex = input.index + variant * 0.47;
+  const amp = scale * spread * (0.012 + Math.max(0, intensity - 0.55) * 0.1);
+
+  return (
+    Math.sin(localPhase * (3.1 + dot.seed * 2.4) + localIndex * 0.85) * amp +
+    Math.cos(localPhase * (5.6 + localIndex * 0.35) + dot.phase) *
+      amp *
+      spread *
+      0.65
+  );
+}
+
+function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: number } {
+  const { dot, index, phase, intensity, scale, variant } = input;
+  if (intensity <= 0.38) {
+    return { x, y };
+  }
+
+  const localPhase = (phase + variant * 1.4) * (1 + intensity * 0.18);
+  const localIndex = index + variant * 0.47;
+  const disturb = intensity * intensity;
+  let ox = horizontalJitter(input);
+  let oy =
+    Math.sin(localPhase * (2.2 + dot.seed * 2) + localIndex * 1.15) *
+    scale *
+    disturb *
+    0.085;
+
+  if (intensity > 0.45) {
+    const chaos = (intensity - 0.45) ** 2;
+    oy += Math.sin(localPhase * 8.2 + localIndex * 2.1) * scale * chaos * 0.12;
+    ox +=
+      Math.cos(localPhase * 7.4 + localIndex * 1.7 + dot.phase + variant) *
+      scale *
+      chaos *
+      0.1;
+  }
+
+  if (input.layout === "ring") {
+    const cx = input.width / 2;
+    const cy = input.height / 2;
+    const dx = x - cx;
+    const dy = y - cy;
+    const angle = Math.atan2(dy, dx);
+    const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
+    const radial = { x: Math.cos(angle), y: Math.sin(angle) };
+    return {
+      x: x + tangential.x * ox + radial.x * oy,
+      y: y + tangential.y * ox + radial.y * oy,
+    };
+  }
+
+  return { x: x + ox, y: y + oy };
+}
+
+function adaptMotionToLayout(input: MotionInput, result: DotDrawParams): DotDrawParams {
+  let { x, y } = result;
+  const { layout, baseX, baseY, width, height } = input;
+
+  if (layout === "ring") {
+    const cx = width / 2;
+    const cy = height / 2;
+    const dx = x - baseX;
+    const dy = y - baseY;
+    const angle = Math.atan2(baseY - cy, baseX - cx);
+    const tangential = { x: -Math.sin(angle), y: Math.cos(angle) };
+    const radial = { x: Math.cos(angle), y: Math.sin(angle) };
+    x = baseX + tangential.x * dy + radial.x * dx;
+    y = baseY + tangential.y * dy + radial.y * dx;
+  }
+
+  ({ x, y } = applyChaos(input, x, y));
+  return { ...result, x, y };
 }
 
 function resolveLayout(config: WaveformCardConfig): WaveformLayout {
@@ -142,7 +234,7 @@ export function buildDots(count: number): ScopeDot[] {
 
 function lineBaseY(height: number, intensity: number): number {
   const spread = smoothstep(intensity);
-  const quietY = height * 0.58;
+  const quietY = height * 0.62;
   const loudY = height * 0.38;
   return quietY + (loudY - quietY) * spread;
 }
@@ -163,9 +255,9 @@ function basePosition(
     case "ring": {
       const cx = width / 2;
       const cy = height / 2;
-      const pad = scale * 0.16;
-      const radius = (Math.min(width, height) / 2 - pad) * (0.82 + span * 0.12);
-      const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
+      const pad = scale * 0.14;
+      const radius = (Math.min(width, height) / 2 - pad) * (0.84 + span * 0.1);
+      const angle = ((index + 0.5) / count) * Math.PI * 2 - Math.PI / 2;
       return {
         x: cx + Math.cos(angle) * radius,
         y: cy + Math.sin(angle) * radius,
@@ -201,19 +293,20 @@ function basePosition(
 }
 
 function waveMotion(input: MotionInput): DotDrawParams {
-  const { index, phase, intensity, scale, baseX, baseY, variant } = input;
+  const { phase, intensity, scale, baseX, baseY, variant } = input;
   const amp = motionAmplitude(intensity, scale);
   const spread = smoothstep(intensity);
   const localPhase = phase + variant * 1.85;
+  const index = waveIndex(input);
   const wave =
-    Math.sin(localPhase * 1.05 - index * 0.38) * amp +
-    Math.sin(localPhase * 0.52 - index * 0.19) * amp * spread * 0.35;
+    Math.sin(localPhase * 1.05 - index) * amp +
+    Math.sin(localPhase * 0.52 - index * 0.5) * amp * spread * 0.4;
 
   return {
     x: baseX,
     y: baseY + wave,
-    radiusMul: 0.88 + spread * 0.28,
-    alphaMul: 0.72 + spread * 0.28,
+    radiusMul: 0.88 + spread * 0.32,
+    alphaMul: 0.72 + spread * 0.3,
   };
 }
 
@@ -233,19 +326,20 @@ function pulseMotion(input: MotionInput): DotDrawParams {
 }
 
 function streamMotion(input: MotionInput): DotDrawParams {
-  const { index, phase, intensity, scale, baseX, baseY, variant } = input;
+  const { phase, intensity, scale, baseX, baseY, variant } = input;
   const spread = smoothstep(intensity);
   const amp = motionAmplitude(intensity, scale);
   const localPhase = phase + variant * 1.2;
+  const index = waveIndex(input);
   const drift =
-    Math.sin(localPhase * 0.62 + index * 0.14) * amp * (0.55 + spread * 0.65);
-  const ripple = Math.sin(localPhase * 1.1 - index * 0.31) * amp * 0.45;
+    Math.sin(localPhase * 0.62 + index * 0.35) * amp * (0.6 + spread * 0.75);
+  const ripple = Math.sin(localPhase * 1.1 - index) * amp * 0.5;
 
   return {
     x: baseX + drift,
     y: baseY + ripple,
-    radiusMul: 0.86 + spread * 0.22,
-    alphaMul: 0.68 + spread * 0.26,
+    radiusMul: 0.86 + spread * 0.26,
+    alphaMul: 0.68 + spread * 0.3,
   };
 }
 
@@ -287,14 +381,15 @@ function cascadeMotion(input: MotionInput): DotDrawParams {
   const amp = motionAmplitude(intensity, scale);
   const t = count <= 1 ? 1 : index / (count - 1);
   const localPhase = phase + variant * 1.4;
-  const ripple = Math.sin(localPhase * 1.15 - index * 0.58) * amp;
-  const build = 0.45 + t * (0.55 + spread * 0.35);
+  const waveIdx = waveIndex(input);
+  const ripple = Math.sin(localPhase * 1.15 - waveIdx * 1.5) * amp;
+  const build = 0.45 + t * (0.55 + spread * 0.4);
 
   return {
     x: baseX,
     y: baseY + ripple * build,
-    radiusMul: 0.82 + spread * 0.24 * build,
-    alphaMul: 0.64 + spread * 0.3 * build,
+    radiusMul: 0.82 + spread * 0.28 * build,
+    alphaMul: 0.64 + spread * 0.34 * build,
   };
 }
 
@@ -333,7 +428,7 @@ export function computeDotDrawParams(
   );
   const motion = MOTION_ENGINES[presets.motion];
 
-  return motion({
+  const result = motion({
     dot,
     index,
     count,
@@ -345,7 +440,26 @@ export function computeDotDrawParams(
     width,
     height,
     variant,
+    layout: presets.layout,
   });
+
+  return adaptMotionToLayout(
+    {
+      dot,
+      index,
+      count,
+      phase,
+      intensity,
+      scale,
+      baseX: base.x,
+      baseY: base.y,
+      width,
+      height,
+      variant,
+      layout: presets.layout,
+    },
+    result
+  );
 }
 
 export function edgeFade(
@@ -353,13 +467,24 @@ export function edgeFade(
   y: number,
   width: number,
   height: number,
-  scale: number
+  scale: number,
+  layout: WaveformLayout
 ): number {
-  const margin = Math.max(4, scale * 0.07);
-  const left = Math.min(1, Math.max(0, x / margin));
-  const right = Math.min(1, Math.max(0, (width - x) / margin));
-  const top = Math.min(1, Math.max(0, y / margin));
-  const bottom = Math.min(1, Math.max(0, (height - y) / margin));
+  if (layout === "ring") {
+    return 1;
+  }
+
+  const marginX = Math.max(4, scale * 0.06);
+  const marginY = Math.max(3, scale * 0.04);
+  const left = Math.min(1, Math.max(0, x / marginX));
+  const right = Math.min(1, Math.max(0, (width - x) / marginX));
+  const top = Math.min(1, Math.max(0, y / marginY));
+  const bottom = Math.min(1, Math.max(0, (height - y) / marginY));
+
+  if (layout === "line") {
+    return Math.min(left, right);
+  }
+
   return Math.min(left, right, top, bottom);
 }
 
