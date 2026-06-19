@@ -12,7 +12,7 @@ Distribution is **HACS only**. Do not commit build output or local dev artifacts
 
 | Commit | Do not commit |
 |--------|----------------|
-| `src/`, `hacs.json`, `dist/nvision.js`, workflows, `package.json`, `package-lock.json` | other `dist/` files, `dist-gallery/`, `node_modules/`, `refs/`, `.hass_dev/` |
+| `src/`, `hacs.json`, `dist/nvision.js`, workflows, `package.json`, `package-lock.json` | other `dist/` files, `node_modules/`, `refs/`, `.hass_dev/` |
 
 HACS validates `main` and expects `dist/nvision.js`. Commit the built bundle after source changes (release CI also updates it on tag push).
 

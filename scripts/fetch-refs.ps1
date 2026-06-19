@@ -67,6 +67,4 @@ Push-Location $haPath
 yarn gulp gen-icons-json build-translations build-locale-data
 Pop-Location
 
-& (Join-Path $root "scripts\patch-ha-gallery-windows.ps1")
-
 Write-Host "References ready in refs/ (gitignored, local only)"

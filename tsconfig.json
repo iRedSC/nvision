@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "experimentalDecorators": true
   },
-  "include": ["src/**/*.ts", "gallery/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "refs"]
 }

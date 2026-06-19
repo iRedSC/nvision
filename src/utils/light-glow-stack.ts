@@ -1,6 +1,6 @@
 const STYLE_ID = "nvision-light-glow-stack";
 
-/** Keep ambient glow under neighboring dashboard / gallery cards. */
+/** Keep ambient glow under neighboring dashboard cards. */
 export function ensureLightGlowStacking(cardTag: string): void {
   if (typeof document === "undefined" || document.getElementById(STYLE_ID)) {
     return;
