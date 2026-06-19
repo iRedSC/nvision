@@ -500,14 +500,19 @@ export class NvisionCircleGaugeCard extends LitElement implements LovelaceCard {
       align-items: center;
       justify-content: center;
       height: 100%;
+      min-height: 0;
       padding: var(--ha-space-3, 12px);
       box-sizing: border-box;
     }
 
     .gauge-wrap {
       position: relative;
-      width: 100%;
-      max-width: var(--nv-gauge-max-size);
+      flex: 1 1 0;
+      min-height: 0;
+      min-width: 0;
+      align-self: center;
+      width: min(100%, var(--nv-gauge-max-size));
+      max-height: var(--nv-gauge-max-size);
       aspect-ratio: 1;
     }
 
