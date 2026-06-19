@@ -20,6 +20,7 @@ import {
   DEFAULT_POWER_MAX,
   DEFAULT_POWER_MIN,
   effectIntensity,
+  overMaxRatio,
   parseNumericState,
   peakOverMaxRatio,
   powerTint,
@@ -155,11 +156,22 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
   }
 
   private _lightningColor(): string {
-    if (this._overMaxSeverity() > 0) {
-      return resolveOverMaxColor(this);
+    return resolveLightningColor(this._config?.color, this);
+  }
+
+  private _overMaxColor(): string {
+    return resolveOverMaxColor(this);
+  }
+
+  private _entitySeverity(entityId: string): number {
+    const value = parseNumericState(this.hass?.states[entityId]?.state);
+    if (value === undefined) {
+      return 0;
     }
 
-    return resolveLightningColor(this._config?.color, this);
+    const min = this._config?.min ?? DEFAULT_POWER_MIN;
+    const max = this._config?.max ?? DEFAULT_POWER_MAX;
+    return overMaxRatio(value, min, max);
   }
 
   private _rawValues(): (number | undefined)[] {
@@ -173,7 +185,11 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
   }
 
   private _syncLightningTheme(): void {
-    this.style.setProperty("--lightning-color", this._lightningColor());
+    const defaultColor = this._lightningColor();
+    const overColor = this._overMaxColor();
+    const anyOverMax = this._overMaxSeverity() > 0;
+
+    this.style.setProperty("--lightning-color", defaultColor);
 
     const entityIds = this._entityIds();
     const icons = this._entityIcons ? Array.from(this._entityIcons) : [];
@@ -183,10 +199,19 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
       const intensity = this._displayIntensities.get(entityId) ?? 0;
       const tint = powerTint(intensity);
       peakTint = Math.max(peakTint, tint);
-      icons[index]?.style.setProperty("--lightning-glow", String(tint));
+      const icon = icons[index];
+      icon?.style.setProperty("--lightning-glow", String(tint));
+      icon?.style.setProperty(
+        "--lightning-color",
+        this._entitySeverity(entityId) > 0 ? overColor : defaultColor
+      );
     });
 
     this._plug?.style.setProperty("--lightning-glow", String(peakTint));
+    this._plug?.style.setProperty(
+      "--lightning-color",
+      anyOverMax ? overColor : defaultColor
+    );
   }
 
   private _entityIds(): string[] {
@@ -249,33 +274,36 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
 
     const icons = this._entityIcons ? Array.from(this._entityIcons) : [];
     const entityIds = this._entityIds();
-    const color = this._lightningColor();
-    const severity = this._overMaxSeverity();
+    const defaultColor = this._lightningColor();
+    const overColor = this._overMaxColor();
+    const { width, height } = canvas.getBoundingClientRect();
     const arcs: LightningArc[] = [];
 
     entityIds.forEach((entityId, index) => {
       const icon = icons[index];
       const target = anchorCenter(icon, canvas, "center");
       const intensity = this._displayIntensities.get(entityId) ?? 0;
+      const severity = this._entitySeverity(entityId);
 
       if (!target) {
         return;
       }
 
-      arcs.push({ from: plug, to: target, intensity, color });
-    });
+      const arcColor = severity > 0 ? overColor : defaultColor;
+      arcs.push({ from: plug, to: target, intensity, color: arcColor });
 
-    if (severity > 0) {
-      appendChaoticArcs(
-        arcs,
-        plug,
-        canvas.clientWidth,
-        canvas.clientHeight,
-        severity,
-        phase,
-        color
-      );
-    }
+      if (severity > 0) {
+        appendChaoticArcs(
+          arcs,
+          target,
+          width,
+          height,
+          severity,
+          phase,
+          overColor
+        );
+      }
+    });
 
     return arcs;
   }
@@ -447,6 +475,12 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
       height: calc(100% + 56px);
       display: block;
       pointer-events: none;
+    }
+
+    ha-card.over-max canvas {
+      inset: -44px;
+      width: calc(100% + 88px);
+      height: calc(100% + 88px);
     }
   `,
   ];

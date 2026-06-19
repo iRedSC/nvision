@@ -95,6 +95,8 @@ export interface LightningArc {
   color?: string;
   /** Multiplier for stroke opacity (overflow arcs use a softer glow). */
   alphaScale?: number;
+  /** Scales zigzag displacement (overflow arcs stay inside the canvas). */
+  wiggleScale?: number;
 }
 
 export function isOverMax(
@@ -162,6 +164,15 @@ function rayMaxRadius(
   return Number.isFinite(maxR) ? Math.max(0, maxR) : 0;
 }
 
+/** Pixels of stroke, glow, and zigzag that extend past the bolt endpoints. */
+function boltBleedMargin(intensity: number, distance: number): number {
+  const cappedIntensity = Math.min(1, intensity);
+  const drawIntensity = effectiveIntensity(cappedIntensity);
+  const lineWidth = 1 + drawIntensity * 1.6;
+  const wiggle = wiggleAmplitude(cappedIntensity, distance);
+  return wiggle + lineWidth * 3 + lineWidth;
+}
+
 /** Wild bolts from an origin — severity scales count, reach, and flicker. */
 export function appendChaoticArcs(
   arcs: LightningArc[],
@@ -190,12 +201,14 @@ export function appendChaoticArcs(
     const angle =
       seededRandom(Math.floor(phase * flickerRate) + i * 17.3) * Math.PI * 2;
     const maxR = rayMaxRadius(origin, width, height, angle);
-    if (maxR < 6) {
+    const bleed = boltBleedMargin(intensity, maxR);
+    const safeMaxR = Math.max(0, maxR - bleed);
+    if (safeMaxR < 6) {
       continue;
     }
 
     const radius =
-      maxR *
+      safeMaxR *
       lengthT *
       (0.5 + seededRandom(phase + i * 3.7) * 0.5);
     arcs.push({
@@ -206,6 +219,7 @@ export function appendChaoticArcs(
       },
       intensity,
       alphaScale,
+      wiggleScale: 0.5,
       color,
     });
   }
@@ -363,7 +377,8 @@ function drawSingleBolt(
   intensity: number,
   seed: number,
   color: string,
-  alphaScale = 1
+  alphaScale = 1,
+  wiggleScale = 1
 ): void {
   const cappedIntensity = Math.min(1, intensity);
   const drawIntensity = effectiveIntensity(cappedIntensity);
@@ -373,7 +388,7 @@ function drawSingleBolt(
   }
 
   const segments = Math.min(14, Math.max(5, Math.round(distance / 14)));
-  const displacement = wiggleAmplitude(cappedIntensity, distance);
+  const displacement = wiggleAmplitude(cappedIntensity, distance) * wiggleScale;
   const points = zigzagPath(from, to, segments, displacement, seed);
   const alpha = (0.5 + drawIntensity * 0.42) * alphaScale;
   const width = 1 + drawIntensity * 1.6;
@@ -387,7 +402,8 @@ export function drawLightningArc(
   intensity: number,
   phase: number,
   color: string,
-  alphaScale = 1
+  alphaScale = 1,
+  wiggleScale = 1
 ): void {
   if (intensity <= 0) {
     return;
@@ -405,7 +421,8 @@ export function drawLightningArc(
     intensity,
     Math.floor(phase * 3),
     color,
-    alphaScale
+    alphaScale,
+    wiggleScale
   );
 }
 
@@ -536,7 +553,8 @@ export class PowerLightningRenderer {
         arc.intensity,
         this._phase,
         arc.color ?? color,
-        arc.alphaScale ?? 1
+        arc.alphaScale ?? 1,
+        arc.wiggleScale ?? 1
       );
     }
   }

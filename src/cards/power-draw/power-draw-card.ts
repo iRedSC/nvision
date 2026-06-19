@@ -127,11 +127,11 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
   }
 
   private _lightningColor(): string {
-    if (this._overMaxSeverity() > 0) {
-      return resolveOverMaxColor(this);
-    }
-
     return resolveLightningColor(this._config?.color, this);
+  }
+
+  private _overMaxColor(): string {
+    return resolveOverMaxColor(this);
   }
 
   private _rawValue(): number | undefined {
@@ -152,7 +152,11 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
   }
 
   private _syncLightningTheme(): void {
-    this.style.setProperty("--lightning-color", this._lightningColor());
+    const color =
+      this._overMaxSeverity() > 0
+        ? this._overMaxColor()
+        : this._lightningColor();
+    this.style.setProperty("--lightning-color", color);
     this.style.setProperty(
       "--lightning-glow",
       String(powerTint(this._displayIntensity))
@@ -210,21 +214,23 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
       return [];
     }
 
-    const color = this._lightningColor();
     const severity = this._overMaxSeverity();
+    const arcColor =
+      severity > 0 ? this._overMaxColor() : this._lightningColor();
     const arcs: LightningArc[] = [
-      { from: plug, to: entity, intensity: this._displayIntensity, color },
+      { from: plug, to: entity, intensity: this._displayIntensity, color: arcColor },
     ];
 
     if (severity > 0) {
+      const { width, height } = canvas.getBoundingClientRect();
       appendChaoticArcs(
         arcs,
-        plug,
-        canvas.clientWidth,
-        canvas.clientHeight,
+        entity,
+        width,
+        height,
         severity,
         phase,
-        color
+        arcColor
       );
     }
 
@@ -373,6 +379,12 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
       height: calc(100% + 56px);
       display: block;
       pointer-events: none;
+    }
+
+    ha-card.over-max canvas {
+      inset: -44px;
+      width: calc(100% + 88px);
+      height: calc(100% + 88px);
     }
   `,
   ];
