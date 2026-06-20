@@ -9,8 +9,11 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import {
+  customHeatColor,
+  heatMapGradientCss,
   levelGradientColor,
   temperatureGradientColor,
+  themeHeatColor,
 } from "../../utils/colors";
 import { registerCustomCard } from "../../utils/custom-cards";
 import { formatStateWithUnit } from "../../utils/entity-state";
@@ -26,13 +29,13 @@ import {
   formatHistoryError,
   loadHistoryPoints,
   resolveCallWS,
+  type AggregateType,
 } from "../../utils/history-data";
 import { handleLovelaceAction } from "../../utils/lovelace-actions";
 import { responsiveTypeStyles } from "../../utils/responsive-type";
 import type { ColorMode, HeatMapCardConfig } from "./heat-map-card-config";
 import {
   DEFAULT_COLOR_MODE,
-  DEFAULT_PERIOD,
   DEFAULT_PRESET,
   HEAT_MAP_CARD_EDITOR_NAME,
   HEAT_MAP_CARD_NAME,
@@ -44,43 +47,99 @@ registerCustomCard({
   description: "Temporal heat map for sensor history and patterns",
 });
 
-interface ActiveTooltip {
-  y: number;
-  x: number;
+interface ActivePopover {
+  anchorX: number;
+  anchorY: number;
   label: string;
   value: string;
   count: number;
 }
 
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(() => resolve(), { timeout: 120 });
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+function resolveColorMode(mode: ColorMode | undefined): ColorMode {
+  if (!mode || mode === "primary") {
+    return "theme";
+  }
+  return mode;
+}
+
 function resolveHeatColor(
   host: HTMLElement,
   level: number,
-  mode: ColorMode
+  mode: ColorMode,
+  config: HeatMapCardConfig
 ): string {
-  if (mode === "semantic") {
+  const resolved = resolveColorMode(mode);
+
+  if (resolved === "semantic") {
     return levelGradientColor(host, level);
   }
-  if (mode === "temperature") {
+  if (resolved === "temperature") {
     return temperatureGradientColor(host, level);
   }
-  return "var(--primary-color)";
+  if (resolved === "custom") {
+    return customHeatColor(host, level, config.color_low, config.color_high);
+  }
+  return themeHeatColor(host, level);
+}
+
+function cellBackground(
+  host: HTMLElement,
+  level: number,
+  mode: ColorMode,
+  config: HeatMapCardConfig,
+  hasValue: boolean
+): string {
+  if (!hasValue) {
+    return "var(--state-inactive-color, var(--divider-color))";
+  }
+
+  const color = resolveHeatColor(host, level, mode, config);
+  const mix = Math.max(level, 0.08) * 85;
+  return `color-mix(in srgb, ${color} ${mix}%, var(--card-background-color))`;
 }
 
 function formatCellValue(
   value: number | null,
-  aggregate: HeatMapCardConfig["aggregate"],
-  unit: string
+  aggregate: AggregateType,
+  unit: string,
+  compact = false
 ): string {
   if (value === null) {
     return "—";
   }
+
   const rounded =
     aggregate === "count"
       ? String(Math.round(value))
       : Number.isInteger(value)
         ? String(value)
-        : value.toFixed(1);
-  return unit ? `${rounded} ${unit}` : rounded;
+        : compact
+          ? value.toFixed(0)
+          : value.toFixed(1);
+
+  if (!unit || aggregate === "count") {
+    return rounded;
+  }
+
+  return compact ? rounded : `${rounded} ${unit}`;
+}
+
+function formatLegendValue(
+  value: number,
+  aggregate: AggregateType,
+  unit: string
+): string {
+  return formatCellValue(value, aggregate, unit, true);
 }
 
 function firstWeekday(_hass: HomeAssistant): number {
@@ -118,12 +177,11 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       type: `custom:${HEAT_MAP_CARD_NAME}`,
       entity,
       preset: DEFAULT_PRESET,
-      period: DEFAULT_PERIOD,
-      aggregate: defaultAggregate(entity),
       color_mode: DEFAULT_COLOR_MODE,
       show_axis_labels: true,
       show_legend: true,
       show_current: true,
+      show_cell_values: false,
     };
   }
 
@@ -137,7 +195,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
   @state() private _error?: string;
 
-  @state() private _tooltip?: ActiveTooltip;
+  @state() private _popover?: ActivePopover;
 
   private _fetchVersion = 0;
 
@@ -149,22 +207,12 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       return "";
     }
 
-    const axes = resolveAxes(
-      config.preset,
-      config.x_axis,
-      config.y_axis,
-      config.period
-    );
+    const axes = resolveAxes(config.preset);
 
     return JSON.stringify({
       entity: config.entity,
       preset: config.preset,
-      period: config.period,
-      x_axis: config.x_axis,
-      y_axis: config.y_axis,
-      aggregate: config.aggregate ?? defaultAggregate(config.entity),
-      min: config.min,
-      max: config.max,
+      aggregate: defaultAggregate(config.entity),
       axes,
     });
   }
@@ -172,15 +220,15 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
   public setConfig(config: HeatMapCardConfig): void {
     this._config = {
       preset: DEFAULT_PRESET,
-      period: DEFAULT_PERIOD,
       color_mode: DEFAULT_COLOR_MODE,
       show_axis_labels: true,
       show_legend: true,
       show_current: true,
+      show_cell_values: false,
       tap_action: { action: "more-info" },
       hold_action: { action: "more-info" },
       ...config,
-      aggregate: config.aggregate ?? defaultAggregate(config.entity),
+      color_mode: resolveColorMode(config.color_mode),
     };
     this._loadKey = undefined;
   }
@@ -237,19 +285,20 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     this._error = undefined;
 
     try {
-      const axes = resolveAxes(
-        config.preset,
-        config.x_axis,
-        config.y_axis,
-        config.period
-      );
-      const aggregate = config.aggregate ?? defaultAggregate(entity);
+      const axes = resolveAxes(config.preset);
+      const aggregate = defaultAggregate(entity);
       const points = await loadHistoryPoints(
         hass,
         entity,
         PERIOD_HOURS[axes.period],
         aggregate
       );
+
+      if (fetchVersion !== this._fetchVersion) {
+        return;
+      }
+
+      await yieldToMain();
 
       if (fetchVersion !== this._fetchVersion) {
         return;
@@ -262,9 +311,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
         axes.period,
         aggregate,
         hass.config.time_zone || "UTC",
-        firstWeekday(hass),
-        config.min,
-        config.max
+        firstWeekday(hass)
       );
     } catch (error) {
       if (fetchVersion !== this._fetchVersion) {
@@ -279,173 +326,204 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     }
   }
 
-  private _handleCardAction(action: "tap" | "hold"): void {
+  private _handleHeaderClick(ev: Event): void {
+    ev.stopPropagation();
     if (!this.hass || !this._config) {
       return;
     }
-    handleLovelaceAction(this, this.hass, this._config, action);
+    handleLovelaceAction(this, this.hass, this._config, "tap");
   }
 
-  private _handleHeaderClick(ev: Event): void {
-    ev.stopPropagation();
-    this._handleCardAction("tap");
-  }
-
-  private _handleCardClick(): void {
-    this._tooltip = undefined;
-    this._handleCardAction("tap");
-  }
-
-  private _handleCellClick(
+  private _showPopover(
     ev: Event,
-    y: number,
-    x: number,
     cell: HeatMapGrid["cells"][number][number]
   ): void {
-    ev.stopPropagation();
-    const config = this._config;
-    const stateObj = config?.entity ? this.hass?.states[config.entity] : undefined;
-    const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
-    const value = formatCellValue(
-      cell.value,
-      config?.aggregate,
-      config?.aggregate === "count" ? "" : unit
-    );
-
-    if (this._tooltip?.x === x && this._tooltip?.y === y) {
-      this._tooltip = undefined;
+    const target = ev.currentTarget as HTMLElement;
+    const wrap = target.closest(".grid-wrap") as HTMLElement | null;
+    if (!wrap) {
       return;
     }
 
-    this._tooltip = {
-      x,
-      y,
+    const cellRect = target.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const config = this._config!;
+    const stateObj = config.entity
+      ? this.hass?.states[config.entity]
+      : undefined;
+    const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
+    const aggregate = defaultAggregate(config.entity);
+
+    this._popover = {
+      anchorX: cellRect.left - wrapRect.left + cellRect.width / 2,
+      anchorY: cellRect.top - wrapRect.top,
       label: cell.rangeLabel,
-      value,
+      value: formatCellValue(
+        cell.value,
+        aggregate,
+        aggregate === "count" ? "" : unit
+      ),
       count: cell.count,
     };
   }
 
-  private _renderLegend(mode: ColorMode) {
-    const stops = [0, 0.5, 1];
+  private _hidePopover(): void {
+    this._popover = undefined;
+  }
+
+  private _renderLegend(grid: HeatMapGrid) {
+    const config = this._config!;
+    const mode = resolveColorMode(config.color_mode);
+    const stateObj = config.entity
+      ? this.hass?.states[config.entity]
+      : undefined;
+    const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
+    const aggregate = defaultAggregate(config.entity);
+    const gradient = heatMapGradientCss(
+      this,
+      mode,
+      config.color_low,
+      config.color_high
+    );
+    const mid = (grid.min + grid.max) / 2;
+
     return html`
-      <div class="legend" aria-hidden="true">
-        ${stops.map((stop) => {
-          const color = resolveHeatColor(this, stop, mode);
-          return html`
-            <span
-              class="legend-stop"
-              style=${styleMap({
-                background: `color-mix(in srgb, ${color} 85%, var(--card-background-color))`,
-              })}
-            ></span>
-          `;
-        })}
+      <div class="legend-wrap" aria-hidden="true">
+        <div class="legend-labels">
+          <span>${formatLegendValue(grid.max, aggregate, unit)}</span>
+          <span>${formatLegendValue(mid, aggregate, unit)}</span>
+          <span>${formatLegendValue(grid.min, aggregate, unit)}</span>
+        </div>
+        <div
+          class="legend-bar"
+          style=${styleMap({ background: gradient })}
+        ></div>
       </div>
     `;
   }
 
   private _renderGrid(grid: HeatMapGrid) {
     const config = this._config!;
-    const mode = config.color_mode ?? DEFAULT_COLOR_MODE;
+    const mode = resolveColorMode(config.color_mode);
     const showLabels = config.show_axis_labels !== false;
+    const showValues = config.show_cell_values === true;
+    const showLegend = config.show_legend !== false;
     const stateObj = config.entity ? this.hass?.states[config.entity] : undefined;
     const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
+    const aggregate = defaultAggregate(config.entity);
     const colOffset = showLabels ? 2 : 1;
     const rowOffset = showLabels ? 2 : 1;
 
     return html`
-      <div class="grid-wrap">
-        <div
-          class="grid"
-          style=${styleMap({
-            gridTemplateColumns: showLabels
-              ? `auto repeat(${grid.xLabels.length}, minmax(0, 1fr))`
-              : `repeat(${grid.xLabels.length}, minmax(0, 1fr))`,
-            gridTemplateRows: showLabels
-              ? `auto repeat(${grid.yLabels.length}, minmax(12px, 1fr))`
-              : `repeat(${grid.yLabels.length}, minmax(12px, 1fr))`,
-          })}
-        >
-          ${showLabels ? html`<div class="corner"></div>` : nothing}
-          ${showLabels
-            ? grid.xLabels.map(
-                (label, x) => html`
+      <div class="heatmap-body">
+        <div class="grid-wrap">
+          <div
+            class="grid"
+            style=${styleMap({
+              gridTemplateColumns: showLabels
+                ? `auto repeat(${grid.xLabels.length}, minmax(0, 1fr))`
+                : `repeat(${grid.xLabels.length}, minmax(0, 1fr))`,
+              gridTemplateRows: showLabels
+                ? `auto repeat(${grid.yLabels.length}, auto)`
+                : `repeat(${grid.yLabels.length}, auto)`,
+            })}
+          >
+            ${showLabels ? html`<div class="corner"></div>` : nothing}
+            ${showLabels
+              ? grid.xLabels.map(
+                  (label, x) => html`
+                    <div
+                      class="axis x"
+                      style=${styleMap({
+                        gridColumn: String(x + 2),
+                        gridRow: "1",
+                      })}
+                    >
+                      ${label}
+                    </div>
+                  `
+                )
+              : nothing}
+            ${grid.cells.flatMap((row, y) => {
+              const yLabel = showLabels
+                ? html`
+                    <div
+                      class="axis y"
+                      style=${styleMap({
+                        gridColumn: "1",
+                        gridRow: String(y + rowOffset),
+                      })}
+                    >
+                      ${grid.yLabels[y]}
+                    </div>
+                  `
+                : nothing;
+
+              const cells = row.map((cell, x) => {
+                const level = normalizeLevel(cell.value, grid.min, grid.max);
+                const hasValue = cell.value !== null;
+                return html`
                   <div
-                    class="axis x"
-                    style=${styleMap({
-                      gridColumn: String(x + 2),
-                      gridRow: "1",
+                    class=${classMap({
+                      cell: true,
+                      empty: !hasValue,
+                      "has-value": hasValue,
                     })}
-                  >
-                    ${label}
-                  </div>
-                `
-              )
-            : nothing}
-          ${grid.cells.flatMap((row, y) => {
-            const yLabel = showLabels
-              ? html`
-                  <div
-                    class="axis y"
+                    tabindex="0"
                     style=${styleMap({
-                      gridColumn: "1",
+                      gridColumn: String(x + colOffset),
                       gridRow: String(y + rowOffset),
+                      background: cellBackground(
+                        this,
+                        level,
+                        mode,
+                        config,
+                        hasValue
+                      ),
                     })}
+                    @pointerenter=${(ev: Event) => this._showPopover(ev, cell)}
+                    @pointerleave=${this._hidePopover}
+                    @focus=${(ev: Event) => this._showPopover(ev, cell)}
+                    @blur=${this._hidePopover}
                   >
-                    ${grid.yLabels[y]}
+                    ${showValues && hasValue
+                      ? html`<span class="cell-value"
+                          >${formatCellValue(
+                            cell.value,
+                            aggregate,
+                            aggregate === "count" ? "" : unit,
+                            true
+                          )}</span
+                        >`
+                      : nothing}
                   </div>
-                `
-              : nothing;
+                `;
+              });
 
-            const cells = row.map((cell, x) => {
-              const level = normalizeLevel(cell.value, grid.min, grid.max);
-              const color = resolveHeatColor(this, level, mode);
-              const active =
-                this._tooltip?.x === x && this._tooltip?.y === y;
-              return html`
-                <button
-                  type="button"
-                  class=${classMap({
-                    cell: true,
-                    active,
-                    empty: cell.value === null,
-                  })}
+              return [yLabel, ...cells];
+            })}
+          </div>
+          ${this._popover
+            ? html`
+                <div
+                  class="popover"
+                  role="tooltip"
                   style=${styleMap({
-                    gridColumn: String(x + colOffset),
-                    gridRow: String(y + rowOffset),
-                    background:
-                      cell.value === null
-                        ? "var(--state-inactive-color, var(--divider-color))"
-                        : `color-mix(in srgb, ${color} calc(${Math.max(
-                            level,
-                            0.08
-                          )} * 85%), var(--card-background-color))`,
+                    left: `${this._popover.anchorX}px`,
+                    top: `${this._popover.anchorY}px`,
                   })}
-                  title=${formatCellValue(
-                    cell.value,
-                    config.aggregate,
-                    config.aggregate === "count" ? "" : unit
-                  )}
-                  @click=${(ev: Event) => this._handleCellClick(ev, y, x, cell)}
-                ></button>
-              `;
-            });
-
-            return [yLabel, ...cells];
-          })}
-        </div>
-        ${this._tooltip
-          ? html`
-              <div class="tooltip" role="status">
-                <div class="tooltip-label">${this._tooltip.label}</div>
-                <div class="tooltip-value">${this._tooltip.value}</div>
-                <div class="tooltip-meta">
-                  ${this._tooltip.count} sample${this._tooltip.count === 1 ? "" : "s"}
+                >
+                  <div class="popover-label">${this._popover.label}</div>
+                  <div class="popover-value">${this._popover.value}</div>
+                  <div class="popover-meta">
+                    ${this._popover.count} sample${this._popover.count === 1
+                      ? ""
+                      : "s"}
+                  </div>
                 </div>
-              </div>
-            `
-          : nothing}
+              `
+            : nothing}
+        </div>
+        ${showLegend ? this._renderLegend(grid) : nothing}
       </div>
     `;
   }
@@ -469,7 +547,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
         : "";
 
     return html`
-      <ha-card @click=${this._handleCardClick}>
+      <ha-card>
         <div class="stage">
           <div class="header" @click=${this._handleHeaderClick}>
             ${stateObj
@@ -491,10 +569,6 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
               : this._grid
                 ? this._renderGrid(this._grid)
                 : html`<div class="status">No data</div>`}
-
-          ${this._config.show_legend !== false && this._grid
-            ? this._renderLegend(this._config.color_mode ?? DEFAULT_COLOR_MODE)
-            : nothing}
         </div>
       </ha-card>
     `;
@@ -511,7 +585,6 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     ha-card {
       height: 100%;
-      cursor: pointer;
     }
 
     .stage {
@@ -560,9 +633,18 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       color: var(--error-color);
     }
 
+    .heatmap-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+    }
+
     .grid-wrap {
       position: relative;
       flex: 1;
+      min-width: 0;
       min-height: 0;
       display: flex;
       flex-direction: column;
@@ -573,6 +655,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       min-height: 0;
       display: grid;
       gap: 2px;
+      align-content: start;
     }
 
     .corner {
@@ -599,57 +682,102 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     .cell {
       border: none;
       border-radius: 3px;
-      min-height: 12px;
+      aspect-ratio: 1;
+      width: 100%;
+      min-width: 0;
       padding: 0;
-      cursor: pointer;
+      touch-action: manipulation;
       background: var(--state-inactive-color, var(--divider-color));
       opacity: 0.95;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
     }
 
     .cell.empty {
       opacity: 0.35;
     }
 
-    .cell.active {
+    .cell.has-value:hover,
+    .cell.has-value:focus-visible {
       outline: 2px solid var(--primary-color);
       outline-offset: -1px;
+      z-index: 1;
     }
 
-    .tooltip {
-      margin-top: 8px;
-      padding: 8px 10px;
-      border-radius: var(--ha-card-border-radius, 12px);
+    .cell-value {
+      font-size: 9px;
+      line-height: 1;
+      font-weight: var(--ha-font-weight-medium, 500);
+      color: var(--primary-text-color);
+      text-shadow: 0 0 3px var(--card-background-color);
+      pointer-events: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+      padding: 0 1px;
+    }
+
+    .popover {
+      position: absolute;
+      z-index: 3;
+      pointer-events: none;
+      transform: translate(-50%, calc(-100% - 8px));
+      padding: 6px 8px;
+      border-radius: var(--ha-card-border-radius, 10px);
       background: var(--secondary-background-color, var(--card-background-color));
       border: 1px solid var(--divider-color);
       color: var(--primary-text-color);
       font-size: var(--nv-label-font-size);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      max-width: min(220px, 90vw);
+      white-space: nowrap;
     }
 
-    .tooltip-label {
+    .popover-label {
       color: var(--secondary-text-color);
       margin-bottom: 2px;
     }
 
-    .tooltip-value {
+    .popover-value {
       font-size: var(--nv-value-font-size);
       font-weight: var(--ha-font-weight-medium, 500);
     }
 
-    .tooltip-meta {
+    .popover-meta {
       margin-top: 2px;
       color: var(--secondary-text-color);
+      font-size: 10px;
     }
 
-    .legend {
+    .legend-wrap {
       display: flex;
-      gap: 4px;
-      justify-content: flex-end;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 6px;
+      flex-shrink: 0;
+      align-self: stretch;
+      min-height: 72px;
     }
 
-    .legend-stop {
-      width: 28px;
-      height: 6px;
-      border-radius: 999px;
+    .legend-labels {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--secondary-text-color);
+      text-align: right;
+      line-height: 1.2;
+      padding: 2px 0;
+    }
+
+    .legend-bar {
+      width: 12px;
+      border-radius: 4px;
+      flex: 1;
+      border: 1px solid var(--divider-color);
     }
   `,
   ];

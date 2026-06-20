@@ -3,21 +3,16 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
-import { defaultAggregate } from "../../utils/history-data";
 import type { HeatMapCardConfig } from "./heat-map-card-config";
 import {
-  AGGREGATE_OPTIONS,
-  AXIS_OPTIONS,
   COLOR_MODE_OPTIONS,
   DEFAULT_COLOR_MODE,
-  DEFAULT_PERIOD,
   DEFAULT_PRESET,
   HEAT_MAP_CARD_EDITOR_NAME,
-  PERIOD_OPTIONS,
   PRESET_OPTIONS,
 } from "./const";
 
-const SCHEMA: HaFormSchema[] = [
+const BASE_SCHEMA: HaFormSchema[] = [
   { name: "entity", selector: { entity: {} } },
   { name: "name", selector: { text: {} } },
   {
@@ -30,64 +25,6 @@ const SCHEMA: HaFormSchema[] = [
         mode: "dropdown",
       },
     },
-  },
-  {
-    name: "period",
-    required: true,
-    default: DEFAULT_PERIOD,
-    selector: {
-      select: {
-        options: [...PERIOD_OPTIONS],
-        mode: "dropdown",
-      },
-    },
-  },
-  {
-    type: "grid",
-    name: "",
-    schema: [
-      {
-        name: "x_axis",
-        selector: {
-          select: {
-            options: [...AXIS_OPTIONS],
-            mode: "dropdown",
-          },
-        },
-      },
-      {
-        name: "y_axis",
-        selector: {
-          select: {
-            options: [...AXIS_OPTIONS],
-            mode: "dropdown",
-          },
-        },
-      },
-    ],
-  },
-  {
-    name: "aggregate",
-    selector: {
-      select: {
-        options: [...AGGREGATE_OPTIONS],
-        mode: "dropdown",
-      },
-    },
-  },
-  {
-    type: "grid",
-    name: "",
-    schema: [
-      {
-        name: "min",
-        selector: { number: { step: "any" } },
-      },
-      {
-        name: "max",
-        selector: { number: { step: "any" } },
-      },
-    ],
   },
   {
     name: "color_mode",
@@ -106,7 +43,19 @@ const SCHEMA: HaFormSchema[] = [
     schema: [
       { name: "show_axis_labels", selector: { boolean: {} } },
       { name: "show_legend", selector: { boolean: {} } },
+      { name: "show_cell_values", selector: { boolean: {} } },
       { name: "show_current", selector: { boolean: {} } },
+    ],
+  },
+];
+
+const CUSTOM_COLOR_SCHEMA: HaFormSchema[] = [
+  {
+    type: "grid",
+    name: "",
+    schema: [
+      { name: "color_low", selector: { color_rgb: {} } },
+      { name: "color_high", selector: { color_rgb: {} } },
     ],
   },
 ];
@@ -121,14 +70,22 @@ export class NvisionHeatMapCardEditor
   public setConfig(config: HeatMapCardConfig): void {
     this._config = {
       preset: DEFAULT_PRESET,
-      period: DEFAULT_PERIOD,
       color_mode: DEFAULT_COLOR_MODE,
       show_axis_labels: true,
       show_legend: true,
       show_current: true,
+      show_cell_values: false,
       ...config,
-      aggregate: config.aggregate ?? defaultAggregate(config.entity),
+      color_mode:
+        config.color_mode === "primary" ? "theme" : config.color_mode,
     };
+  }
+
+  private _schema(): HaFormSchema[] {
+    if (this._config?.color_mode === "custom") {
+      return [...BASE_SCHEMA, ...CUSTOM_COLOR_SCHEMA];
+    }
+    return BASE_SCHEMA;
   }
 
   private _computeLabel = (schema: HaFormSchema) => {
@@ -149,35 +106,19 @@ export class NvisionHeatMapCardEditor
     }
 
     if (schema.name === "preset") {
-      return "Preset";
-    }
-
-    if (schema.name === "period") {
-      return "Period";
-    }
-
-    if (schema.name === "x_axis") {
-      return "X axis";
-    }
-
-    if (schema.name === "y_axis") {
-      return "Y axis";
-    }
-
-    if (schema.name === "aggregate") {
-      return "Aggregate";
-    }
-
-    if (schema.name === "min") {
-      return "Minimum (optional)";
-    }
-
-    if (schema.name === "max") {
-      return "Maximum (optional)";
+      return "View";
     }
 
     if (schema.name === "color_mode") {
       return "Color mode";
+    }
+
+    if (schema.name === "color_low") {
+      return "Low color";
+    }
+
+    if (schema.name === "color_high") {
+      return "High color";
     }
 
     if (schema.name === "show_axis_labels") {
@@ -185,7 +126,11 @@ export class NvisionHeatMapCardEditor
     }
 
     if (schema.name === "show_legend") {
-      return "Legend";
+      return "Scale";
+    }
+
+    if (schema.name === "show_cell_values") {
+      return "Values in cells";
     }
 
     if (schema.name === "show_current") {
@@ -206,7 +151,7 @@ export class NvisionHeatMapCardEditor
       <ha-form
         .hass=${this.hass}
         .data=${this._config}
-        .schema=${SCHEMA}
+        .schema=${this._schema()}
         .computeLabel=${this._computeLabel}
         @value-changed=${this._valueChanged}
       ></ha-form>
@@ -218,7 +163,8 @@ export class NvisionHeatMapCardEditor
     fireEvent(this, "config-changed", {
       config: {
         ...config,
-        aggregate: config.aggregate ?? defaultAggregate(config.entity),
+        color_mode:
+          config.color_mode === "primary" ? "theme" : config.color_mode,
       },
     });
   }

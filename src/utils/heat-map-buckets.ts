@@ -20,8 +20,14 @@ export type PeriodPreset =
 
 export type HeatMapPreset =
   | "week_hourly"
+  | "two_weeks"
   | "daily_rhythm"
+  | "month_days"
   | "month_calendar"
+  | "quarter"
+  | "timeline_24h"
+  | "timeline_48h"
+  | "year_overview"
   | "timeline"
   | "custom";
 
@@ -36,14 +42,25 @@ export const PERIOD_HOURS: Record<PeriodPreset, number> = {
 };
 
 export const PRESET_AXES: Record<
-  Exclude<HeatMapPreset, "custom">,
+  Exclude<HeatMapPreset, "custom" | "timeline">,
   { x: AxisField; y: AxisField; period: PeriodPreset }
 > = {
   week_hourly: { x: "hour", y: "day", period: "7d" },
+  two_weeks: { x: "hour", y: "day", period: "14d" },
   daily_rhythm: { x: "hour", y: "weekday", period: "30d" },
+  month_days: { x: "day", y: "week", period: "30d" },
   month_calendar: { x: "weekday", y: "week", period: "90d" },
-  timeline: { x: "time", y: "none", period: "24h" },
+  quarter: { x: "week", y: "month", period: "90d" },
+  timeline_24h: { x: "time", y: "none", period: "24h" },
+  timeline_48h: { x: "time", y: "none", period: "48h" },
+  year_overview: { x: "week", y: "month", period: "365d" },
 };
+
+const LEGACY_PRESET_MAP: Partial<Record<HeatMapPreset, keyof typeof PRESET_AXES>> =
+  {
+    timeline: "timeline_24h",
+    custom: "week_hourly",
+  };
 
 export interface HeatMapCellMeta {
   value: number | null;
@@ -80,6 +97,43 @@ interface PeriodWindow {
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+const zonedFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const utcGuessFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getZonedFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = zonedFormatterCache.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+      weekday: "short",
+    });
+    zonedFormatterCache.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+function getUtcGuessFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = utcGuessFormatterCache.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    utcGuessFormatterCache.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -88,17 +142,10 @@ function getZonedPartsBasic(
   timeMs: number,
   timeZone: string
 ): Omit<ZonedParts, "weekKey"> {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-    weekday: "short",
-  });
   const parts = Object.fromEntries(
-    formatter.formatToParts(new Date(timeMs)).map((part) => [part.type, part.value])
+    getZonedFormatter(timeZone)
+      .formatToParts(new Date(timeMs))
+      .map((part) => [part.type, part.value])
   );
   const weekday =
     WEEKDAY_SHORT.indexOf(String(parts.weekday)) >= 0
@@ -166,17 +213,10 @@ function zonedTimeToUtcMs(
   timeZone: string
 ): number {
   const guess = Date.UTC(year, month - 1, day, hour, minute, 0);
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
   const parts = Object.fromEntries(
-    formatter.formatToParts(new Date(guess)).map((part) => [part.type, part.value])
+    getUtcGuessFormatter(timeZone)
+      .formatToParts(new Date(guess))
+      .map((part) => [part.type, part.value])
   );
   const actual = Date.UTC(
     Number(parts.year),
@@ -462,24 +502,14 @@ function cellRangeLabel(
 }
 
 export function resolveAxes(
-  preset: HeatMapPreset | undefined,
-  xAxis: AxisField | undefined,
-  yAxis: AxisField | undefined,
-  period: PeriodPreset | undefined
+  preset: HeatMapPreset | undefined
 ): { x: AxisField; y: AxisField; period: PeriodPreset } {
-  if (preset && preset !== "custom" && PRESET_AXES[preset]) {
-    const base = PRESET_AXES[preset];
-    return {
-      ...base,
-      period: period ?? base.period,
-    };
-  }
+  const key =
+    (preset && LEGACY_PRESET_MAP[preset]) ||
+    (preset && preset in PRESET_AXES ? preset : undefined) ||
+    "week_hourly";
 
-  return {
-    x: xAxis ?? "hour",
-    y: yAxis ?? "day",
-    period: period ?? "7d",
-  };
+  return PRESET_AXES[key as keyof typeof PRESET_AXES];
 }
 
 export function buildHeatMapGrid(
@@ -497,6 +527,8 @@ export function buildHeatMapGrid(
   const bucketMs = timeBucketMs(window.hours);
   const xAxis = buildAxis(xField, window, timeZone, firstWeekday, bucketMs);
   const yAxis = buildAxis(yField, window, timeZone, firstWeekday, bucketMs);
+  const xKeySet = new Set(xAxis.keys);
+  const yKeySet = new Set(yAxis.keys);
   const bucketMap = new Map<string, number[]>();
 
   for (const point of points) {
@@ -509,7 +541,7 @@ export function buildHeatMapGrid(
     if (xKey === undefined || yKey === undefined) {
       continue;
     }
-    if (!xAxis.keys.includes(xKey) || !yAxis.keys.includes(yKey)) {
+    if (!xKeySet.has(xKey) || !yKeySet.has(yKey)) {
       continue;
     }
 

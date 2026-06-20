@@ -1,29 +1,22 @@
 import type { LovelaceCardConfig } from "../../types";
+import type { ConfigColor } from "../../utils/colors";
 import type { ActionConfig } from "../../utils/lovelace-actions";
-import type {
-  AggregateType,
-  AxisField,
-  HeatMapPreset,
-  PeriodPreset,
-} from "./const";
+import type { HeatMapPreset } from "./const";
 
-export type ColorMode = "primary" | "semantic" | "temperature";
+export type ColorMode = "theme" | "semantic" | "temperature" | "custom" | "primary";
 
 export interface HeatMapCardConfig extends LovelaceCardConfig {
   type: `custom:${string}`;
   entity?: string;
   name?: string;
   preset?: HeatMapPreset;
-  period?: PeriodPreset;
-  x_axis?: AxisField;
-  y_axis?: AxisField;
-  aggregate?: AggregateType;
-  min?: number;
-  max?: number;
   color_mode?: ColorMode;
+  color_low?: ConfigColor;
+  color_high?: ConfigColor;
   show_axis_labels?: boolean;
   show_legend?: boolean;
   show_current?: boolean;
+  show_cell_values?: boolean;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
 }

@@ -147,3 +147,67 @@ export function temperatureGradientColor(
 
   return toRgb(mixRgb(warm, hot, (t - 0.5) * 2));
 }
+
+/** Subtle card background → primary accent. Default heat map palette. */
+export function themeHeatColor(host: HTMLElement, level: number): string {
+  const primary = parseCssColor(
+    readCssColor(host, "--primary-color", "#03a9f4")
+  );
+  const cardBg = parseCssColor(
+    readCssColor(host, "--card-background-color", "#1c1c1c")
+  );
+  const inactive = parseCssColor(
+    readCssColor(host, "--state-inactive-color", "#6b7280")
+  );
+  const t = Math.min(1, Math.max(0, level));
+  const floor = mixRgb(mixRgb(cardBg, inactive, 0.35), primary, 0.06);
+  return toRgb(mixRgb(floor, primary, 0.15 + t * 0.85));
+}
+
+export function customHeatColor(
+  host: HTMLElement,
+  level: number,
+  colorLow: ConfigColor | undefined,
+  colorHigh: ConfigColor | undefined
+): string {
+  const low = parseCssColor(
+    resolveConfigColor(colorLow, readCssColor(host, "--info-color", "#2196f3"))
+  );
+  const high = parseCssColor(
+    resolveConfigColor(colorHigh, readCssColor(host, "--error-color", "#f44336"))
+  );
+  const t = Math.min(1, Math.max(0, level));
+  return toRgb(mixRgb(low, high, t));
+}
+
+export function heatMapGradientCss(
+  host: HTMLElement,
+  mode: "theme" | "semantic" | "temperature" | "custom" | "primary",
+  colorLow?: ConfigColor,
+  colorHigh?: ConfigColor,
+  steps = 12
+): string {
+  const resolve = (level: number) => {
+    if (mode === "primary") {
+      return themeHeatColor(host, level);
+    }
+    if (mode === "semantic") {
+      return levelGradientColor(host, level);
+    }
+    if (mode === "temperature") {
+      return temperatureGradientColor(host, level);
+    }
+    if (mode === "custom") {
+      return customHeatColor(host, level, colorLow, colorHigh);
+    }
+    return themeHeatColor(host, level);
+  };
+
+  const stops = Array.from({ length: steps }, (_, index) => {
+    const level = index / (steps - 1);
+    const pct = (level * 100).toFixed(1);
+    return `${resolve(level)} ${pct}%`;
+  });
+
+  return `linear-gradient(to bottom, ${stops.join(", ")})`;
+}

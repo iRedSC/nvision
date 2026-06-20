@@ -155,6 +155,24 @@ function statisticsToPoints(
   return points;
 }
 
+const MAX_RAW_HISTORY_POINTS = 8000;
+
+function downsamplePoints(
+  points: HistoryPoint[],
+  maxPoints: number
+): HistoryPoint[] {
+  if (points.length <= maxPoints) {
+    return points;
+  }
+
+  const step = Math.ceil(points.length / maxPoints);
+  const sampled: HistoryPoint[] = [];
+  for (let index = 0; index < points.length; index += step) {
+    sampled.push(points[index]);
+  }
+  return sampled;
+}
+
 function normalizeHistoryResponse(
   response: Record<string, EntityHistoryState[]> | EntityHistoryState[][],
   entityId: string
@@ -182,9 +200,13 @@ export async function fetchHistoryPoints(
     entity_ids: [entityId],
     minimal_response: true,
     no_attributes: true,
+    significant_changes_only: true,
   });
 
-  return historyToPoints(normalizeHistoryResponse(response, entityId), binary);
+  return downsamplePoints(
+    historyToPoints(normalizeHistoryResponse(response, entityId), binary),
+    MAX_RAW_HISTORY_POINTS
+  );
 }
 
 export async function fetchStatisticsPoints(
@@ -231,7 +253,7 @@ export async function loadHistoryPoints(
     return fetchHistoryPoints(hass, entityId, start, end, true);
   }
 
-  if (periodHours > 48) {
+  if (periodHours >= 24) {
     try {
       const period = periodHours > 24 * 14 ? "day" : "hour";
       const stats = await fetchStatisticsPoints(
