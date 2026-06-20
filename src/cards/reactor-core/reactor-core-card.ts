@@ -173,11 +173,13 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     super.disconnectedCallback();
   }
 
-  protected updated(changed: Map<string, unknown>): void {
+  protected willUpdate(changed: Map<string, unknown>): void {
     if ((changed.has("hass") || changed.has("_config")) && this.hass && this._config) {
       this._syncParticles();
     }
+  }
 
+  protected updated(changed: Map<string, unknown>): void {
     this._ensureCanvas();
   }
 
@@ -249,13 +251,19 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
     if (this._showInfoChange() && changedIds.length) {
       const nextChanges = { ...this._infoChangeFrom };
+      let changed = false;
+
       for (const entityId of changedIds) {
         const previous = previousFormatted.get(entityId);
-        if (previous) {
+        if (previous && nextChanges[entityId] !== previous) {
           nextChanges[entityId] = previous;
+          changed = true;
         }
       }
-      this._infoChangeFrom = nextChanges;
+
+      if (changed) {
+        this._infoChangeFrom = nextChanges;
+      }
     }
 
     this._pruneInfoChangeFrom();
@@ -323,11 +331,25 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       return;
     }
 
+    const currentIds = this._slotIds.filter(Boolean).sort().join("|");
+    const nextIds = slots.filter(Boolean).sort().join("|");
+    if (currentIds === nextIds) {
+      return;
+    }
+
     this._slotIds = slots;
     this._pruneInfoChangeFrom();
   }
 
   private _assignToOldestSlot(entityId: string): void {
+    const existingIndex = this._slotIds.indexOf(entityId);
+    if (existingIndex >= 0) {
+      const ages = [...this._slotAge];
+      ages[existingIndex] = performance.now();
+      this._slotAge = ages;
+      return;
+    }
+
     const slots = [...this._slotIds];
     const ages = [...this._slotAge];
 
@@ -336,6 +358,12 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       if (ages[index] < ages[oldestIndex]) {
         oldestIndex = index;
       }
+    }
+
+    if (slots[oldestIndex] === entityId) {
+      ages[oldestIndex] = performance.now();
+      this._slotAge = ages;
+      return;
     }
 
     slots[oldestIndex] = entityId;
