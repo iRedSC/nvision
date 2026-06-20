@@ -39,6 +39,7 @@ export interface ReactorParticle {
   trailCapacity: number;
   binaryOn: boolean;
   flash: number;
+  lastState?: string;
   numericNorm: number;
   unavailable: boolean;
   placed: boolean;
@@ -207,6 +208,7 @@ function createParticle(
     trailCapacity: trailCapacityFor(kind, numericNorm),
     binaryOn: isBinaryOn(hass, entityId),
     flash: 0,
+    lastState: state,
     numericNorm,
     unavailable: state === "unavailable" || state === "unknown",
     placed: false,
@@ -284,14 +286,19 @@ export function syncParticles(
       const kind = classifyParticleKind(hass, entityId);
       const numericNorm = numericNormForEntity(hass, entityId, min, max);
       const binaryOn = isBinaryOn(hass, entityId);
+      const state = hass.states[entityId]?.state ?? "";
 
       existing.shell = layout.shell;
       existing.slot = layout.slot;
       existing.slotsOnShell = layout.slotsOnShell;
 
-      if (binaryOn !== existing.binaryOn) {
+      if (
+        existing.lastState !== undefined &&
+        state !== existing.lastState
+      ) {
         existing.flash = 1;
       }
+      existing.lastState = state;
       existing.kind = kind;
       existing.numericNorm = numericNorm;
       existing.binaryOn = binaryOn;
@@ -485,20 +492,23 @@ export function drawReactor(
   }
 
   for (const particle of particles) {
+    const flashBoost = particle.flash;
     const baseRadius =
-      particle.kind === "binary"
+      (particle.kind === "binary"
         ? scale * 0.022
         : particle.kind === "numeric"
           ? scale * 0.011 + particle.numericNorm * scale * 0.007
-          : scale * 0.013;
+          : scale * 0.013) *
+      (1 + flashBoost * 0.45);
 
     let alpha = particle.unavailable ? 0.28 : 0.78;
     if (particle.kind === "binary") {
       const pulse = particle.binaryOn
         ? 0.55 + Math.sin(timeMs * 0.012 + particle.seed * 12) * 0.35
         : 0.35;
-      alpha = Math.min(1, pulse + particle.flash * 0.45);
+      alpha = pulse;
     }
+    alpha = Math.min(1, alpha + flashBoost * 0.55);
 
     const color = particleColor(particle, timeMs, alpha);
     drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha);
