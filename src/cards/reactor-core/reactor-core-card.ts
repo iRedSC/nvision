@@ -180,8 +180,6 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       this._config.min,
       this._config.max,
       (this._config.entities ?? []).join(","),
-      width,
-      height,
     ].join(";");
 
     if (key + configKey !== this._entityKey) {

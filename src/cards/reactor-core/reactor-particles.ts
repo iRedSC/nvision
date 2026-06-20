@@ -124,15 +124,20 @@ function applyVisualState(
   particle.unavailable = visual.unavailable;
 }
 
-function orbitSpeedMultiplier(particle: ReactorParticle): number {
+function orbitSpeedMultiplier(particle: ReactorParticle, scale: number): number {
+  const radius = orbRadiusForSpeed(particle, scale);
+  const ref = scale * 0.014;
+  return Math.min(3.4, Math.max(0.5, ref / Math.max(radius, scale * 0.004)));
+}
+
+function orbRadiusForSpeed(particle: ReactorParticle, scale: number): number {
   if (particle.kind === "numeric") {
-    const n = particle.numericNorm;
-    return 0.15 + n * n * 5.5;
+    return numericRadius(scale, particle.numericNorm);
   }
-  if (particle.kind === "timer") {
-    return 0.6 + particle.timerUrgency * 2.4;
+  if (particle.kind === "light") {
+    return scale * (0.008 + particle.lightBrightness * 0.024);
   }
-  return 0.75 + particle.seed * 0.5;
+  return defaultOrbRadius(scale, particle.kind);
 }
 
 function numericRadius(scale: number, numericNorm: number): number {
@@ -204,7 +209,6 @@ function createParticle(
   const seedY = hashSeed(`${entityId}:y`);
   const layout = shellLayout(index, count);
   const state = hass.states[entityId]?.state;
-  const direction = layout.shell % 2 === 0 ? 1 : -1;
 
   const particle: ReactorParticle = {
     entityId,
@@ -219,7 +223,7 @@ function createParticle(
     slotsOnShell: layout.slotsOnShell,
     orbitTilt: seed * TAU,
     orbitRyScale: 0.62 + seedY * 0.32,
-    baseOrbitSpeed: direction * (0.00085 + seed * 0.0011),
+    baseOrbitSpeed: 0.00085 + seed * 0.0011,
     wobbleSpeed: 0.0016 + seedY * 0.0024,
     vx: 0,
     vy: 0,
@@ -332,10 +336,6 @@ export function syncParticles(
       existing.slot = layout.slot;
       existing.slotsOnShell = layout.slotsOnShell;
 
-      if (width > 0 && height > 0) {
-        placeParticle(existing, width, height, timeMs);
-      }
-
       if (existing.lastState !== undefined && state !== existing.lastState) {
         spawnPulse(existing, pulses);
       }
@@ -406,21 +406,20 @@ function drawToggleParticle(
   scale: number,
   timeMs: number
 ): void {
+  const coreRadius = defaultOrbRadius(scale, "toggle");
   const flashSpeed = particle.isOn ? 0.012 : 0.007;
   const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 12);
-  const sizePulse = 1 + pulse * (particle.isOn ? 0.42 : 0.14);
-  const coreRadius = defaultOrbRadius(scale, "toggle") * sizePulse;
-  const coreAlpha = particle.isOn ? 0.88 : 0.32;
-  const glow = particle.isOn
-    ? (0.45 + pulse * 0.4) * sizePulse
-    : (0.08 + pulse * 0.04) * sizePulse;
+  const haloGlow = particle.isOn
+    ? 0.38 + pulse * 0.48
+    : 0.06 + pulse * 0.06;
   const hue = pulseHue(particle.seed, timeMs);
+  const coreAlpha = particle.isOn ? 0.92 : 0.34;
 
   const color = particle.unavailable
     ? `hsla(${hue}, 18%, 42%, ${coreAlpha * 0.4})`
-    : `hsla(${hue}, ${particle.isOn ? 88 : 42}%, ${particle.isOn ? 62 : 38}%, ${coreAlpha})`;
+    : `hsla(${hue}, ${particle.isOn ? 90 : 38}%, ${particle.isOn ? 65 : 36}%, ${coreAlpha})`;
 
-  drawGlowDot(ctx, particle.x, particle.y, coreRadius, color, glow);
+  drawGlowDot(ctx, particle.x, particle.y, coreRadius, color, haloGlow);
 }
 
 function drawLightParticle(
@@ -513,7 +512,9 @@ function simulateParticles(
 
   for (const particle of particles) {
     particle.phase +=
-      particle.baseOrbitSpeed * orbitSpeedMultiplier(particle) * delta;
+      particle.baseOrbitSpeed *
+      orbitSpeedMultiplier(particle, scale) *
+      delta;
 
     const target = orbitTarget(particle, width, height, timeMs);
     particle.vx += (target.x - particle.x) * spring * delta;
@@ -583,7 +584,8 @@ export function updateParticles(
       if (
         particle.kind === "timer" ||
         particle.kind === "light" ||
-        particle.kind === "numeric"
+        particle.kind === "numeric" ||
+        particle.kind === "toggle"
       ) {
         applyVisualState(particle, hass, min, max);
       }
@@ -601,24 +603,15 @@ export function drawPulses(
 ): void {
   for (const pulse of pulses) {
     const t = pulse.age / PULSE_LIFE_MS;
-    const radius = scale * (0.04 + t * 0.55);
-    const alpha = (1 - t) ** 1.4 * 0.09;
+    const radius = scale * (0.03 + t * 0.48);
+    const alpha = (1 - t) ** 1.2 * 0.11;
     const hue = pulseHue(pulse.seed, timeMs);
-    const gradient = ctx.createRadialGradient(
-      pulse.x,
-      pulse.y,
-      radius * 0.15,
-      pulse.x,
-      pulse.y,
-      radius
-    );
-    gradient.addColorStop(0, `hsla(${hue}, 82%, 62%, 0)`);
-    gradient.addColorStop(0.55, `hsla(${hue}, 82%, 62%, ${alpha})`);
-    gradient.addColorStop(1, `hsla(${hue}, 82%, 62%, 0)`);
+
     ctx.beginPath();
     ctx.arc(pulse.x, pulse.y, radius, 0, TAU);
-    ctx.fillStyle = gradient;
-    ctx.fill();
+    ctx.strokeStyle = `hsla(${hue}, 86%, 64%, ${alpha})`;
+    ctx.lineWidth = 1 + (1 - t) * 1.4;
+    ctx.stroke();
   }
 }
 
