@@ -90,16 +90,16 @@ function smoothstep(value: number): number {
 }
 
 function motionAmplitude(intensity: number, height: number): number {
-  const t = intensity;
+  const t = Math.max(0.08, intensity);
   const spread = smoothstep(t);
   const surge = Math.max(0, t - 0.5) ** 2;
-  const lowBias = (1 - spread) * 0.1;
-  return height * (0.08 + lowBias + spread * 0.22 + surge * 0.3);
+  const lowBias = (1 - spread) * 0.16;
+  return height * (0.28 + lowBias + spread * 0.22 + surge * 0.26);
 }
 
 function motionFrequency(intensity: number): number {
-  const spread = smoothstep(intensity);
-  return 0.35 + spread * 0.72;
+  const spread = smoothstep(Math.max(0.08, intensity));
+  return 0.42 + spread * 0.68;
 }
 
 function motionAxes(input: MotionInput): AxisVectors {

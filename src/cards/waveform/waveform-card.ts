@@ -315,8 +315,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     y: number,
     radius: number,
     color: string,
-    alpha: number,
-    glow: number
+    alpha: number
   ): void {
     if (alpha <= 0.01) {
       return;
@@ -324,7 +323,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
     ctx.save();
     ctx.shadowColor = color;
-    ctx.shadowBlur = radius * glow;
+    ctx.shadowBlur = radius * 2.4;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fillStyle = color;
@@ -355,12 +354,13 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
     this._syncIntensity();
     const rawIntensity = this._tickIntensity(delta);
+    const animIntensity = Math.max(0.12, rawIntensity);
     const { shakeAt, shakeSpeed } = this._shakeThresholds();
     const presets = this._presets();
 
     this._phase +=
       delta *
-      (0.014 + rawIntensity * rawIntensity * 0.1) *
+      (0.014 + animIntensity * animIntensity * 0.1) *
       presets.phaseSpeed;
 
     if (rawIntensity >= shakeAt) {
@@ -385,7 +385,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
         i,
         this._dots.length,
         this._phase,
-        rawIntensity,
+        animIntensity,
         width,
         height,
         0,
@@ -404,14 +404,13 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       const radius =
         baseRadius *
         params.radiusMul *
-        (0.75 + rawIntensity * 0.35 + highBoost * 0.45);
+        (0.82 + animIntensity * 0.28 + highBoost * 0.2);
       const alpha =
-        (0.18 + rawIntensity * 0.42 + highBoost * highBoost * 1.1) *
+        (0.3 + animIntensity * 0.52 + highBoost * highBoost * 0.6) *
         params.alphaMul *
         fade;
-      const glow = 2.2 + rawIntensity * 1.4 + highBoost * 1.6;
 
-      this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha, glow);
+      this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
     }
   }
 
