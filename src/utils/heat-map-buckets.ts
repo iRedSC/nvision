@@ -275,7 +275,7 @@ function enumerateWeeks(
   while (cursor <= window.endMs) {
     const parts = getZonedPartsBasic(cursor, timeZone);
     weeks.push({
-      key: parts.weekKey,
+      key: parts.dateKey,
       label: `${parts.month}/${parts.day}`,
     });
     cursor += 7 * 24 * 60 * 60 * 1000;
