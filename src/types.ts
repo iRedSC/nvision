@@ -20,6 +20,9 @@ export interface HomeAssistant {
     serviceData?: Record<string, unknown>,
     target?: Record<string, unknown>
   ) => Promise<void>;
+  callWS?: <T = unknown>(
+    message: Record<string, unknown>
+  ) => Promise<T>;
   user?: { name: string };
   themes: unknown;
   locale?: { language: string };

@@ -75,6 +75,7 @@ Updates appear in HACS after a GitHub release is published.
 | `custom:nvision-power-draw-card` | Power draw |
 | `custom:nvision-power-glance-card` | Power glance |
 | `custom:nvision-waveform-card` | Waveform |
+| `custom:nvision-heat-map-card` | Temporal heat map |
 
 ## Releases
 

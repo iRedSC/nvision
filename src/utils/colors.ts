@@ -128,3 +128,22 @@ export function levelGradientColor(host: HTMLElement, level: number): string {
 
   return toRgb(mixRgb(yellow, red, (t - 0.5) * 2));
 }
+
+/** Cool → warm gradient for temperature-style heat maps. */
+export function temperatureGradientColor(
+  host: HTMLElement,
+  level: number
+): string {
+  const cool = parseCssColor(readCssColor(host, "--info-color", "#2196f3"));
+  const warm = parseCssColor(
+    readCssColor(host, "--warning-color", "#ff9800")
+  );
+  const hot = parseCssColor(readCssColor(host, "--error-color", "#f44336"));
+  const t = Math.min(1, Math.max(0, level));
+
+  if (t <= 0.5) {
+    return toRgb(mixRgb(cool, warm, t * 2));
+  }
+
+  return toRgb(mixRgb(warm, hot, (t - 0.5) * 2));
+}
