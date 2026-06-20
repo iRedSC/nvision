@@ -149,9 +149,6 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     const canvas = this._canvas;
-    const scale = canvas
-      ? Math.min(canvas.clientWidth, canvas.clientHeight)
-      : 200;
     const entityIds = this._discoverIds();
     const key = entityIds.join("|");
     const configKey = [
@@ -165,22 +162,12 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     ].join(";");
 
     if (key + configKey === this._entityKey && this._particles.length) {
-      this._particles = syncParticles(
-        this._particles,
-        this.hass,
-        this._config,
-        scale
-      );
+      this._particles = syncParticles(this._particles, this.hass, this._config);
       return;
     }
 
     this._entityKey = key + configKey;
-    this._particles = syncParticles(
-      this._particles,
-      this.hass,
-      this._config,
-      scale
-    );
+    this._particles = syncParticles(this._particles, this.hass, this._config);
   }
 
   private _discoverIds(): string[] {

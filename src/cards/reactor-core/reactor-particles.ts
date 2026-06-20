@@ -21,9 +21,12 @@ export interface ReactorParticle {
   x: number;
   y: number;
   angle: number;
-  orbitRadius: number;
+  /** Fraction of usable half-axis (width/height), spread across inner–outer shells */
+  orbitRxFactor: number;
+  orbitRyFactor: number;
   orbitSpeed: number;
-  epicycleRadius: number;
+  epicycleRxFactor: number;
+  epicycleRyFactor: number;
   epicycleSpeed: number;
   trail: { x: number; y: number }[];
   trailCapacity: number;
@@ -141,14 +144,35 @@ export function discoverEntityIds(
     .slice(0, maxParticles);
 }
 
+function orbitFactors(
+  seed: number,
+  seedY: number,
+  band: number
+): { rx: number; ry: number; epRx: number; epRy: number } {
+  const shell = 0.34 + band * 0.58;
+  const jitter = (seed - 0.5) * 0.14;
+  const rx = Math.min(0.94, Math.max(0.28, shell + jitter));
+  const ry = Math.min(0.94, Math.max(0.28, shell + (seedY - 0.5) * 0.14));
+  return {
+    rx,
+    ry,
+    epRx: 0.06 + seed * 0.1,
+    epRy: 0.06 + seedY * 0.08,
+  };
+}
+
 function createParticle(
   hass: HomeAssistant,
   entityId: string,
   min: number,
   max: number,
-  scale: number
+  index: number,
+  count: number
 ): ReactorParticle {
   const seed = hashSeed(entityId);
+  const seedY = hashSeed(`${entityId}:y`);
+  const band = count > 1 ? index / (count - 1) : 0.5;
+  const orbit = orbitFactors(seed, seedY, band);
   const kind = classifyParticleKind(hass, entityId);
   const numericNorm = numericNormForEntity(hass, entityId, min, max);
   const state = hass.states[entityId]?.state;
@@ -160,10 +184,12 @@ function createParticle(
     x: 0,
     y: 0,
     angle: seed * Math.PI * 2,
-    orbitRadius: scale * (0.12 + seed * 0.28),
-    orbitSpeed: 0.0009 + seed * 0.0016,
-    epicycleRadius: scale * (0.018 + seed * 0.045),
-    epicycleSpeed: 0.0014 + seed * 0.0022,
+    orbitRxFactor: orbit.rx,
+    orbitRyFactor: orbit.ry,
+    orbitSpeed: 0.0007 + seed * 0.0012,
+    epicycleRxFactor: orbit.epRx,
+    epicycleRyFactor: orbit.epRy,
+    epicycleSpeed: 0.0011 + seed * 0.0018,
     trail: [],
     trailCapacity: trailCapacityFor(kind, numericNorm),
     binaryOn: isBinaryOn(hass, entityId),
@@ -176,8 +202,7 @@ function createParticle(
 export function syncParticles(
   particles: ReactorParticle[],
   hass: HomeAssistant,
-  config: ReactorCoreCardConfig,
-  scale: number
+  config: ReactorCoreCardConfig
 ): ReactorParticle[] {
   const min = config.min ?? DEFAULT_MIN;
   const max = config.max ?? DEFAULT_MAX;
@@ -185,12 +210,23 @@ export function syncParticles(
   const byId = new Map(particles.map((particle) => [particle.entityId, particle]));
   const next: ReactorParticle[] = [];
 
-  for (const entityId of entityIds) {
+  for (let index = 0; index < entityIds.length; index += 1) {
+    const entityId = entityIds[index];
     const existing = byId.get(entityId);
     if (existing) {
       const kind = classifyParticleKind(hass, entityId);
       const numericNorm = numericNormForEntity(hass, entityId, min, max);
       const binaryOn = isBinaryOn(hass, entityId);
+      const band = entityIds.length > 1 ? index / (entityIds.length - 1) : 0.5;
+      const orbit = orbitFactors(
+        existing.seed,
+        hashSeed(`${entityId}:y`),
+        band
+      );
+      existing.orbitRxFactor = orbit.rx;
+      existing.orbitRyFactor = orbit.ry;
+      existing.epicycleRxFactor = orbit.epRx;
+      existing.epicycleRyFactor = orbit.epRy;
       if (binaryOn !== existing.binaryOn) {
         existing.flash = 1;
       }
@@ -208,7 +244,7 @@ export function syncParticles(
       continue;
     }
 
-    next.push(createParticle(hass, entityId, min, max, scale));
+    next.push(createParticle(hass, entityId, min, max, index, entityIds.length));
   }
 
   return next;
@@ -279,11 +315,12 @@ function drawGlowDot(
   y: number,
   radius: number,
   color: string,
-  glow: number
+  glow: number,
+  haloScale = 0.45
 ): void {
   ctx.beginPath();
-  ctx.arc(x, y, radius * (1 + glow * 0.8), 0, Math.PI * 2);
-  ctx.fillStyle = color.replace(/[\d.]+\)$/, `${0.12 + glow * 0.18})`);
+  ctx.arc(x, y, radius * (1 + glow * haloScale), 0, Math.PI * 2);
+  ctx.fillStyle = color.replace(/[\d.]+\)$/, `${0.08 + glow * 0.12})`);
   ctx.fill();
 
   ctx.beginPath();
@@ -303,26 +340,31 @@ export function updateParticles(
   const cx = width / 2;
   const cy = height / 2;
   const scale = Math.min(width, height);
+  const halfW = width * 0.5;
+  const halfH = height * 0.5;
+  const padX = Math.max(8, width * 0.04);
+  const padY = Math.max(8, height * 0.04);
   const motion = reducedMotion ? 0.12 : 1;
   const t = timeMs * 0.001;
 
   for (const particle of particles) {
     particle.angle += particle.orbitSpeed * delta * motion;
 
+    const rx = (halfW - padX) * particle.orbitRxFactor;
+    const ry = (halfH - padY) * particle.orbitRyFactor;
+    const epRx = (halfW - padX) * particle.epicycleRxFactor;
+    const epRy = (halfH - padY) * particle.epicycleRyFactor;
+
     const orbitX =
-      cx + Math.cos(particle.angle + particle.seed * 6.28) * particle.orbitRadius;
+      cx + Math.cos(particle.angle + particle.seed * 6.28) * rx;
     const orbitY =
       cy +
-      Math.sin(particle.angle * 0.83 + particle.seed * 4.17) *
-        particle.orbitRadius *
-        0.88;
+      Math.sin(particle.angle * 0.83 + particle.seed * 4.17) * ry;
 
     const epX =
-      Math.cos(t * particle.epicycleSpeed + particle.seed * 9.1) *
-      particle.epicycleRadius;
+      Math.cos(t * particle.epicycleSpeed + particle.seed * 9.1) * epRx;
     const epY =
-      Math.sin(t * particle.epicycleSpeed * 1.27 + particle.seed * 5.3) *
-      particle.epicycleRadius;
+      Math.sin(t * particle.epicycleSpeed * 1.27 + particle.seed * 5.3) * epRy;
 
     let x = orbitX + epX;
     let y = orbitY + epY;
@@ -334,23 +376,18 @@ export function updateParticles(
       const dx = x - other.x;
       const dy = y - other.y;
       const dist = Math.hypot(dx, dy);
-      const minDist = scale * 0.07;
+      const minDist = scale * 0.11;
       if (dist > 0.5 && dist < minDist) {
-        const push = ((minDist - dist) / minDist) * scale * 0.012 * motion;
+        const push = ((minDist - dist) / minDist) * scale * 0.018 * motion;
         x += (dx / dist) * push;
         y += (dy / dist) * push;
       }
     }
 
-    const toCenterX = cx - x;
-    const toCenterY = cy - y;
-    const centerDist = Math.hypot(toCenterX, toCenterY);
-    const limit = scale * 0.44;
-    if (centerDist > limit) {
-      const pull = (centerDist - limit) * 0.035 * motion;
-      x += (toCenterX / centerDist) * pull;
-      y += (toCenterY / centerDist) * pull;
-    }
+    const clampX = halfW - padX;
+    const clampY = halfH - padY;
+    x = Math.min(cx + clampX, Math.max(cx - clampX, x));
+    y = Math.min(cy + clampY, Math.max(cy - clampY, y));
 
     particle.x = x;
     particle.y = y;
@@ -376,9 +413,9 @@ export function drawReactor(
 
   ctx.clearRect(0, 0, width, height);
 
-  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.55);
-  bg.addColorStop(0, "hsla(200, 70%, 58%, 0.12)");
-  bg.addColorStop(0.45, "hsla(260, 55%, 42%, 0.06)");
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.72);
+  bg.addColorStop(0, "hsla(200, 70%, 58%, 0.06)");
+  bg.addColorStop(0.35, "hsla(260, 55%, 42%, 0.03)");
   bg.addColorStop(1, "hsla(0, 0%, 0%, 0)");
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
@@ -414,8 +451,9 @@ export function drawReactor(
     ctx,
     cx,
     cy,
-    scale * 0.022 * corePulse,
-    `hsla(${coreHue}, 88%, 68%, 0.85)`,
-    0.9
+    scale * 0.014 * corePulse,
+    `hsla(${coreHue}, 88%, 68%, 0.7)`,
+    0.55,
+    0.35
   );
 }
