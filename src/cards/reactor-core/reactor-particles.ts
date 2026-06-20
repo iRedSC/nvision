@@ -380,97 +380,115 @@ function paletteColor(
   return `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
 }
 
-function drawGlowDot(
-  ctx: CanvasRenderingContext2D,
+interface OrbLayer {
+  x: number;
+  y: number;
+  radius: number;
+  color: string;
+}
+
+interface OrbLayers {
+  halo?: OrbLayer;
+  core: OrbLayer;
+}
+
+function drawOrbLayers(ctx: CanvasRenderingContext2D, layers: OrbLayer[]): void {
+  for (const layer of layers) {
+    ctx.beginPath();
+    ctx.arc(layer.x, layer.y, layer.radius, 0, TAU);
+    ctx.fillStyle = layer.color;
+    ctx.fill();
+  }
+}
+
+function glowDotLayers(
   x: number,
   y: number,
   radius: number,
   color: string,
   glow: number,
   haloScale = 0.5
-): void {
-  drawDualOrb(
-    ctx,
-    x,
-    y,
-    radius,
-    color,
-    radius * (1 + glow * haloScale),
-    color.replace(/[\d.]+\)$/, `${0.07 + glow * 0.1})`)
-  );
-}
+): OrbLayers {
+  const haloRadius = radius * (1 + glow * haloScale);
+  const layers: OrbLayers = {
+    core: { x, y, radius, color },
+  };
 
-function drawDualOrb(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  coreRadius: number,
-  coreColor: string,
-  haloRadius: number,
-  haloColor?: string
-): void {
-  if (haloRadius > coreRadius * 1.02) {
-    ctx.beginPath();
-    ctx.arc(x, y, haloRadius, 0, TAU);
-    ctx.fillStyle = haloColor ?? coreColor.replace(/[\d.]+\)$/, "0.18)");
-    ctx.fill();
+  if (haloRadius > radius * 1.02) {
+    layers.halo = {
+      x,
+      y,
+      radius: haloRadius,
+      color: color.replace(/[\d.]+\)$/, `${0.07 + glow * 0.1})`),
+    };
   }
 
-  ctx.beginPath();
-  ctx.arc(x, y, coreRadius, 0, TAU);
-  ctx.fillStyle = coreColor;
-  ctx.fill();
+  return layers;
 }
 
-function drawToggleParticle(
-  ctx: CanvasRenderingContext2D,
+function toggleOrbLayers(
   particle: ReactorParticle,
   scale: number,
   timeMs: number
-): void {
+): OrbLayers {
   const coreRadius = defaultOrbRadius(scale, "toggle");
-  const flashSpeed = particle.isOn ? 0.014 : 0.007;
+  const flashSpeed = particle.isOn ? 0.009 : 0.007;
   const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 12);
   const bright = (pulse + 1) / 2;
   const hue = pulseHue(particle.seed, timeMs);
+  const coreSat = particle.unavailable ? 18 : particle.isOn ? 88 : 38;
 
   const coreLight = particle.unavailable
     ? 42
     : particle.isOn
-      ? 38 + bright * 42
+      ? 54 + bright * 4
       : 36;
   const coreAlpha = particle.unavailable
     ? 0.18
     : particle.isOn
-      ? 0.42 + bright * 0.52
+      ? 0.78 + bright * 0.12
       : 0.34;
-  const coreSat = particle.unavailable ? 18 : particle.isOn ? 90 : 38;
-
   const coreColor = `hsla(${hue}, ${coreSat}%, ${coreLight}%, ${coreAlpha})`;
+
   const haloRadius = particle.unavailable
     ? coreRadius * 1.08
     : particle.isOn
       ? coreRadius * (1.85 + bright * 0.75)
       : coreRadius * 1.1;
-  const haloColor = `hsla(${hue}, ${coreSat}%, ${coreLight + 8}%, ${
-    particle.isOn ? 0.1 + bright * 0.14 : 0.06
+  const haloColor = `hsla(${hue}, ${coreSat}%, ${Math.max(coreLight - 6, 40)}%, ${
+    particle.isOn ? 0.08 + bright * 0.1 : 0.06
   })`;
 
-  drawDualOrb(ctx, particle.x, particle.y, coreRadius, coreColor, haloRadius, haloColor);
+  return {
+    halo:
+      haloRadius > coreRadius * 1.02
+        ? {
+            x: particle.x,
+            y: particle.y,
+            radius: haloRadius,
+            color: haloColor,
+          }
+        : undefined,
+    core: {
+      x: particle.x,
+      y: particle.y,
+      radius: coreRadius,
+      color: coreColor,
+    },
+  };
 }
 
-function drawLightParticle(
-  ctx: CanvasRenderingContext2D,
+function lightOrbLayers(
   particle: ReactorParticle,
   scale: number,
   timeMs: number
-): void {
+): OrbLayers {
   const brightness = particle.lightBrightness;
   const coreRadius = defaultOrbRadius(scale, "light");
   const alpha = particle.unavailable
     ? 0.25
     : particle.isOn
-      ? 0.62 + brightness * 0.28
+      ? 0.55 + brightness * 0.35
       : 0.18;
   const color =
     particle.lightColor ??
@@ -485,15 +503,30 @@ function drawLightParticle(
       : coreRadius * 1.08;
   const haloColor = withAlpha(color, particle.isOn ? 0.08 + brightness * 0.16 : 0.05);
 
-  drawDualOrb(ctx, particle.x, particle.y, coreRadius, coreColor, haloRadius, haloColor);
+  return {
+    halo:
+      haloRadius > coreRadius * 1.02
+        ? {
+            x: particle.x,
+            y: particle.y,
+            radius: haloRadius,
+            color: haloColor,
+          }
+        : undefined,
+    core: {
+      x: particle.x,
+      y: particle.y,
+      radius: coreRadius,
+      color: coreColor,
+    },
+  };
 }
 
-function drawTimerParticle(
-  ctx: CanvasRenderingContext2D,
+function timerOrbLayers(
   particle: ReactorParticle,
   scale: number,
   timeMs: number
-): void {
+): OrbLayers {
   const urgency = particle.timerUrgency;
   const coreRadius = defaultOrbRadius(scale, "timer");
   const flashSpeed = 0.005 + urgency * 0.048;
@@ -502,31 +535,87 @@ function drawTimerParticle(
   const hueShift = pulse * (24 + urgency * 36);
   const baseHue = pulseHue(particle.seed, timeMs);
   const hue = (baseHue + hueShift + 360) % 360;
-  const coreAlpha = particle.unavailable ? 0.25 : 0.42 + urgency * 0.28;
-  const coreColor = `hsla(${hue}, 86%, ${54 + urgency * 12}%, ${coreAlpha})`;
+  const coreLight = particle.unavailable ? 42 : 52 + urgency * 6;
+  const regularAlpha = particle.unavailable ? 0.25 : 0.38 + urgency * 0.24;
+  const coreAlpha = regularAlpha * (0.55 + bright * 0.45);
+  const coreColor = `hsla(${hue}, 88%, ${coreLight}%, ${coreAlpha})`;
   const haloRadius = particle.unavailable
     ? coreRadius * 1.08
     : coreRadius * (1.35 + bright * (0.75 + urgency * 1.35));
-  const haloColor = `hsla(${hue}, 82%, ${58 + urgency * 10}%, ${
-    0.08 + bright * (0.1 + urgency * 0.14)
+  const haloColor = `hsla(${hue}, 84%, ${coreLight - 4}%, ${
+    0.07 + bright * (0.08 + urgency * 0.12)
   })`;
 
-  drawDualOrb(ctx, particle.x, particle.y, coreRadius, coreColor, haloRadius, haloColor);
+  return {
+    halo:
+      haloRadius > coreRadius * 1.02
+        ? {
+            x: particle.x,
+            y: particle.y,
+            radius: haloRadius,
+            color: haloColor,
+          }
+        : undefined,
+    core: {
+      x: particle.x,
+      y: particle.y,
+      radius: coreRadius,
+      color: coreColor,
+    },
+  };
 }
 
-function drawDefaultParticle(
-  ctx: CanvasRenderingContext2D,
+function defaultOrbLayers(
   particle: ReactorParticle,
   scale: number,
   timeMs: number
-): void {
+): OrbLayers {
   const baseRadius =
     particle.kind === "numeric"
       ? numericRadius(scale, particle.numericNorm)
       : defaultOrbRadius(scale, particle.kind);
   const alpha = particle.unavailable ? 0.28 : 0.78;
   const color = paletteColor(particle, timeMs, alpha);
-  drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha * 0.65);
+  return glowDotLayers(
+    particle.x,
+    particle.y,
+    baseRadius,
+    color,
+    alpha * 0.65
+  );
+}
+
+function particleOrbLayers(
+  particle: ReactorParticle,
+  scale: number,
+  timeMs: number
+): OrbLayers {
+  switch (particle.kind) {
+    case "toggle":
+      return toggleOrbLayers(particle, scale, timeMs);
+    case "light":
+      return lightOrbLayers(particle, scale, timeMs);
+    case "timer":
+      return timerOrbLayers(particle, scale, timeMs);
+    default:
+      return defaultOrbLayers(particle, scale, timeMs);
+  }
+}
+
+function drawGlowDot(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  glow: number,
+  haloScale = 0.5
+): void {
+  const layers = glowDotLayers(x, y, radius, color, glow, haloScale);
+  if (layers.halo) {
+    drawOrbLayers(ctx, [layers.halo]);
+  }
+  drawOrbLayers(ctx, [layers.core]);
 }
 
 function withAlpha(color: string, alpha: number): string {
@@ -714,26 +803,24 @@ export function drawReactor(
 
   drawPulses(ctx, pulses, scale, timeMs);
 
+  const halos: OrbLayer[] = [];
+  const cores: OrbLayer[] = [];
+
   for (const particle of particles) {
-    switch (particle.kind) {
-      case "toggle":
-        drawToggleParticle(ctx, particle, scale, timeMs);
-        break;
-      case "light":
-        drawLightParticle(ctx, particle, scale, timeMs);
-        break;
-      case "timer":
-        drawTimerParticle(ctx, particle, scale, timeMs);
-        break;
-      default:
-        drawDefaultParticle(ctx, particle, scale, timeMs);
-        break;
+    const layers = particleOrbLayers(particle, scale, timeMs);
+    if (layers.halo) {
+      halos.push(layers.halo);
     }
+    cores.push(layers.core);
   }
+
+  drawOrbLayers(ctx, halos);
 
   if (connections.length) {
     drawConnections(ctx, connections, scale, timeMs);
   }
+
+  drawOrbLayers(ctx, cores);
 
   const corePulse = 0.55 + Math.sin(timeMs * 0.0018) * 0.12;
   const coreHue =
