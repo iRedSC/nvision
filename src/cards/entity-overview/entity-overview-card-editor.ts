@@ -7,7 +7,7 @@ import {
   computeInteractionLabel,
   interactionEditorSchema,
 } from "../../utils/interaction-schema";
-import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
+import type { EntityOverviewCardConfig } from "./entity-overview-card-config";
 import {
   DEFAULT_INFO_SELECTION,
   DEFAULT_MAX,
@@ -16,8 +16,8 @@ import {
   DEFAULT_MODE,
   DEFAULT_SHOW_INFO,
   DEFAULT_SHOW_INFO_CHANGE,
-  REACTOR_CORE_CARD_EDITOR_NAME,
-  REACTOR_ENTITY_DOMAINS,
+  ENTITY_OVERVIEW_CARD_EDITOR_NAME,
+  ENTITY_OVERVIEW_DOMAINS,
 } from "./const";
 
 const BASE_SCHEMA: HaFormSchema[] = [
@@ -89,19 +89,19 @@ const MANUAL_SCHEMA: HaFormSchema[] = [
   {
     name: "entities",
     selector: {
-      entity: { multiple: true, domain: [...REACTOR_ENTITY_DOMAINS] },
+      entity: { multiple: true, domain: [...ENTITY_OVERVIEW_DOMAINS] },
     },
   },
 ];
 
-@customElement(REACTOR_CORE_CARD_EDITOR_NAME)
-export class NvisionReactorCoreCardEditor
+@customElement(ENTITY_OVERVIEW_CARD_EDITOR_NAME)
+export class NvisionEntityOverviewCardEditor
   extends NvisionBaseElement
   implements LovelaceCardEditor
 {
-  @state() private _config?: ReactorCoreCardConfig;
+  @state() private _config?: EntityOverviewCardConfig;
 
-  public setConfig(config: ReactorCoreCardConfig): void {
+  public setConfig(config: EntityOverviewCardConfig): void {
     this._config = {
       mode: DEFAULT_MODE,
       max_particles: DEFAULT_MAX_PARTICLES,
@@ -195,6 +195,6 @@ export class NvisionReactorCoreCardEditor
 
 declare global {
   interface HTMLElementTagNameMap {
-    [REACTOR_CORE_CARD_EDITOR_NAME]: NvisionReactorCoreCardEditor;
+    [ENTITY_OVERVIEW_CARD_EDITOR_NAME]: NvisionEntityOverviewCardEditor;
   }
 }

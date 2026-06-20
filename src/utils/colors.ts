@@ -129,6 +129,36 @@ export function levelGradientColor(host: HTMLElement, level: number): string {
   return toRgb(mixRgb(yellow, red, (t - 0.5) * 2));
 }
 
+/** Blue-white cold → orange → red/yellow-white burning (0–1). */
+export function reactorHeatColor(level: number): string {
+  const stops: Array<[number, [number, number, number]]> = [
+    [0, [186, 220, 255]],
+    [0.22, [72, 148, 235]],
+    [0.48, [255, 148, 48]],
+    [0.72, [255, 72, 28]],
+    [1, [255, 244, 196]],
+  ];
+  const t = Math.min(1, Math.max(0, level));
+  let lower = stops[0];
+  let upper = stops[stops.length - 1];
+
+  for (let index = 0; index < stops.length - 1; index++) {
+    if (t >= stops[index][0] && t <= stops[index + 1][0]) {
+      lower = stops[index];
+      upper = stops[index + 1];
+      break;
+    }
+  }
+
+  const span = upper[0] - lower[0] || 1;
+  const mix = (t - lower[0]) / span;
+  return toRgb(mixRgb(lower[1], upper[1], mix));
+}
+
+export function reactorHeatRgb(level: number): [number, number, number] {
+  return parseCssColor(reactorHeatColor(level));
+}
+
 /** Cool → warm gradient for temperature-style heat maps. */
 export function temperatureGradientColor(
   host: HTMLElement,

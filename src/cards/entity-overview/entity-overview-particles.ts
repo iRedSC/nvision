@@ -1,5 +1,5 @@
 import type { HomeAssistant } from "../../types";
-import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
+import type { EntityOverviewCardConfig } from "./entity-overview-card-config";
 import {
   DEFAULT_DOMAINS,
   DEFAULT_MAX,
@@ -10,7 +10,7 @@ import {
   classifyParticleKind,
   readParticleVisualState,
   type ParticleKind,
-} from "./reactor-entity-state";
+} from "./entity-overview-entity-state";
 
 /** Normalized radii for concentric orbital shells (fraction of usable half-axis). */
 const SHELL_RADII = [0.42, 0.58, 0.72, 0.84];
@@ -192,7 +192,7 @@ export function spawnPulse(particle: ReactorParticle, pulses: ReactorPulse[]): v
 
 export function discoverEntityIds(
   hass: HomeAssistant,
-  config: ReactorCoreCardConfig
+  config: EntityOverviewCardConfig
 ): string[] {
   const mode = config.mode ?? "auto";
   if (mode === "manual" && config.entities?.length) {
@@ -357,7 +357,7 @@ export function placeParticle(
 export function syncParticles(
   particles: ReactorParticle[],
   hass: HomeAssistant,
-  config: ReactorCoreCardConfig,
+  config: EntityOverviewCardConfig,
   pulses: ReactorPulse[],
   width = 0,
   height = 0,
@@ -804,7 +804,7 @@ export function updatePulses(
 export function updateParticles(
   particles: ReactorParticle[],
   hass: HomeAssistant | undefined,
-  config: ReactorCoreCardConfig | undefined,
+  config: EntityOverviewCardConfig | undefined,
   width: number,
   height: number,
   delta: number,

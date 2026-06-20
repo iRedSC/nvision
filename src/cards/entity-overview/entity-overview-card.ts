@@ -18,7 +18,7 @@ import {
   responsiveTileInfoStyles,
 } from "../../utils/responsive-type";
 import { formatStateWithUnit } from "../../utils/entity-state";
-import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
+import type { EntityOverviewCardConfig } from "./entity-overview-card-config";
 import {
   DEFAULT_INFO_SELECTION,
   DEFAULT_MAX,
@@ -30,9 +30,9 @@ import {
   INFO_RANDOM_INTERVAL_MS,
   NEAREST_CURSOR_MOVE_THRESHOLD,
   NEAREST_CURSOR_SWAP_MARGIN,
-  REACTOR_CORE_CARD_EDITOR_NAME,
-  REACTOR_CORE_CARD_NAME,
-  REACTOR_ENTITY_DOMAINS,
+  ENTITY_OVERVIEW_CARD_EDITOR_NAME,
+  ENTITY_OVERVIEW_CARD_NAME,
+  ENTITY_OVERVIEW_DOMAINS,
 } from "./const";
 import {
   drawReactor,
@@ -42,13 +42,13 @@ import {
   type ReactorConnection,
   type ReactorParticle,
   type ReactorPulse,
-} from "./reactor-particles";
+} from "./entity-overview-particles";
 
 const INFO_SLOT_COUNT = 4;
 
 registerCustomCard({
-  type: REACTOR_CORE_CARD_NAME,
-  name: "Nvision Reactor Core",
+  type: ENTITY_OVERVIEW_CARD_NAME,
+  name: "Nvision Entity Overview",
   description: "Orbiting sensor particles with reactor-style pulse effects",
 });
 
@@ -56,12 +56,12 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-@customElement(REACTOR_CORE_CARD_NAME)
-export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
+@customElement(ENTITY_OVERVIEW_CARD_NAME)
+export class NvisionEntityOverviewCard extends LitElement implements LovelaceCard {
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
-    await import("./reactor-core-card-editor");
+    await import("./entity-overview-card-editor");
     return document.createElement(
-      REACTOR_CORE_CARD_EDITOR_NAME
+      ENTITY_OVERVIEW_CARD_EDITOR_NAME
     ) as LovelaceCardEditor;
   }
 
@@ -69,7 +69,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     hass: HomeAssistant,
     entities: string[],
     entitiesFallback: string[]
-  ): ReactorCoreCardConfig {
+  ): EntityOverviewCardConfig {
     const pool = [...entities, ...entitiesFallback, ...Object.keys(hass.states)];
     const seen = new Set<string>();
     const picked: string[] = [];
@@ -97,7 +97,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     return {
-      type: `custom:${REACTOR_CORE_CARD_NAME}`,
+      type: `custom:${ENTITY_OVERVIEW_CARD_NAME}`,
       mode: DEFAULT_MODE,
       entities: picked.length ? picked : undefined,
       max_particles: DEFAULT_MAX_PARTICLES,
@@ -108,7 +108,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   @property({ attribute: false }) public hass?: HomeAssistant;
 
-  @state() private _config?: ReactorCoreCardConfig;
+  @state() private _config?: EntityOverviewCardConfig;
 
   @state() private _slotIds: string[] = Array(INFO_SLOT_COUNT).fill("");
 
@@ -138,7 +138,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     () => this._config
   );
 
-  public setConfig(config: ReactorCoreCardConfig): void {
+  public setConfig(config: EntityOverviewCardConfig): void {
     this._config = {
       mode: DEFAULT_MODE,
       max_particles: DEFAULT_MAX_PARTICLES,
@@ -299,7 +299,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     this._pruneInfoChangeFrom();
   }
 
-  private _infoSelection(): ReactorCoreCardConfig["info_selection"] {
+  private _infoSelection(): EntityOverviewCardConfig["info_selection"] {
     return this._config?.info_selection ?? DEFAULT_INFO_SELECTION;
   }
 
@@ -711,7 +711,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       return nothing;
     }
 
-    const title = this._config.name || "Reactor Core";
+    const title = this._config.name || "Entity Overview";
     const showInfo = this._showInfo();
 
     return html`
@@ -866,14 +866,14 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
 function discoverIds(
   hass: HomeAssistant,
-  config: ReactorCoreCardConfig
+  config: EntityOverviewCardConfig
 ): string[] {
   const mode = config.mode ?? DEFAULT_MODE;
   if (mode === "manual" && config.entities?.length) {
     return config.entities.filter((id) => Boolean(hass.states[id]));
   }
 
-  const domains = config.domains?.length ? config.domains : [...REACTOR_ENTITY_DOMAINS];
+  const domains = config.domains?.length ? config.domains : [...ENTITY_OVERVIEW_DOMAINS];
   const max = config.max_particles ?? DEFAULT_MAX_PARTICLES;
 
   return Object.keys(hass.states)
@@ -884,6 +884,6 @@ function discoverIds(
 
 declare global {
   interface HTMLElementTagNameMap {
-    [REACTOR_CORE_CARD_NAME]: NvisionReactorCoreCard;
+    [ENTITY_OVERVIEW_CARD_NAME]: NvisionEntityOverviewCard;
   }
 }

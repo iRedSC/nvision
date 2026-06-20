@@ -1,16 +1,16 @@
 import type { LovelaceCardConfig } from "../../types";
 import type { ActionConfig } from "../../utils/lovelace-actions";
 
-export type ReactorCoreMode = "auto" | "manual";
+export type EntityOverviewMode = "auto" | "manual";
 
-export type ReactorInfoSelection =
+export type EntityOverviewInfoSelection =
   | "on_update"
   | "random_interval"
   | "nearest_cursor";
 
-export interface ReactorCoreCardConfig extends LovelaceCardConfig {
+export interface EntityOverviewCardConfig extends LovelaceCardConfig {
   type: `custom:${string}`;
-  mode?: ReactorCoreMode;
+  mode?: EntityOverviewMode;
   entities?: string[];
   max_particles?: number;
   domains?: string[];
@@ -18,7 +18,7 @@ export interface ReactorCoreCardConfig extends LovelaceCardConfig {
   min?: number;
   max?: number;
   name?: string;
-  info_selection?: ReactorInfoSelection;
+  info_selection?: EntityOverviewInfoSelection;
   show_info?: boolean;
   show_info_change?: boolean;
   tap_action?: ActionConfig;
