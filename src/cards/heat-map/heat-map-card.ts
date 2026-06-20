@@ -110,12 +110,11 @@ function cellBackground(
   }
 
   const color = resolveHeatColor(host, level, mode, config);
-  const minMix = 28;
-  const maxMix = 92;
-  const span = maxMix - minMix;
-  const mix = config.dim_low_values
-    ? minMix + level * level * span
-    : minMix + level * span;
+  if (!config.dim_low_values) {
+    return color;
+  }
+
+  const mix = 22 + level * level * 78;
   return `color-mix(in srgb, ${color} ${mix}%, var(--card-background-color))`;
 }
 
