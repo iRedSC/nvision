@@ -144,6 +144,24 @@ function orbRadiusForSpeed(particle: ReactorParticle, scale: number): number {
   return defaultOrbRadius(scale, particle.kind);
 }
 
+/** Repulsion extent — includes typical halo so orbs don't visually overlap. */
+function orbCollisionRadius(particle: ReactorParticle, scale: number): number {
+  const core = orbRadiusForSpeed(particle, scale);
+
+  if (particle.kind === "toggle") {
+    return particle.isOn ? core * 1.55 : core * OFF_ORB_HALO_SCALE;
+  }
+  if (particle.kind === "light") {
+    return particle.isOn
+      ? core * (1.2 + particle.lightBrightness * 1.4)
+      : core * 1.08;
+  }
+  if (particle.kind === "timer") {
+    return core * 1.45;
+  }
+  return core * 1.3;
+}
+
 function numericRadius(scale: number, numericNorm: number): number {
   return scale * (0.006 + numericNorm * 0.028);
 }
@@ -658,12 +676,19 @@ function simulateParticles(
 ): void {
   const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
   const refRadius = scale * 0.012;
+  const minRadius = scale * 0.003;
   const spring = 0.0032 * motion;
-  const repulse = 0.018 * motion;
+  const repulse = 0.022 * motion;
   const damping = 0.88;
+  const collisionRadii = particles.map((particle) =>
+    orbCollisionRadius(particle, scale)
+  );
 
-  for (const particle of particles) {
-    const particleRadius = orbRadiusForSpeed(particle, scale);
+  for (let i = 0; i < particles.length; i += 1) {
+    const particle = particles[i];
+    const particleRadius = collisionRadii[i];
+    const mass = Math.max(particleRadius, minRadius) / refRadius;
+    const springK = spring * Math.min(1.35, Math.max(0.4, 1 / Math.sqrt(mass)));
 
     particle.phase +=
       particle.baseOrbitSpeed *
@@ -671,24 +696,40 @@ function simulateParticles(
       delta;
 
     const target = orbitTarget(particle, width, height, timeMs);
-    particle.vx += (target.x - particle.x) * spring * delta;
-    particle.vy += (target.y - particle.y) * spring * delta;
+    particle.vx += (target.x - particle.x) * springK * delta;
+    particle.vy += (target.y - particle.y) * springK * delta;
 
-    for (const other of particles) {
-      if (other === particle) {
+    for (let j = 0; j < particles.length; j += 1) {
+      if (j === i) {
         continue;
       }
-      const otherRadius = orbRadiusForSpeed(other, scale);
-      const pairDist = (particleRadius + otherRadius) * 2.1;
+      const other = particles[j];
+      const otherRadius = collisionRadii[j];
+      const touchDist = particleRadius + otherRadius;
+      const pairDist = touchDist + scale * 0.014;
       const dx = particle.x - other.x;
       const dy = particle.y - other.y;
       const dist = Math.hypot(dx, dy);
-      if (dist > 0.5 && dist < pairDist) {
-        const overlap = (pairDist - dist) / pairDist;
-        const otherInfluence = otherRadius / refRadius;
-        const push = overlap ** 1.2 * repulse * otherInfluence * delta;
-        particle.vx += (dx / dist) * push;
-        particle.vy += (dy / dist) * push;
+      if (dist <= 0.5 || dist >= pairDist) {
+        continue;
+      }
+
+      const proximity = (pairDist - dist) / (pairDist - touchDist * 0.65);
+      const penetration = Math.max(0, touchDist - dist);
+      const massRatio = Math.max(otherRadius, minRadius) / Math.max(particleRadius, minRadius);
+      const push =
+        (proximity ** 1.2 + (penetration / touchDist) * 2.5) *
+        repulse *
+        massRatio *
+        delta;
+
+      particle.vx += (dx / dist) * push;
+      particle.vy += (dy / dist) * push;
+
+      if (penetration > 0) {
+        const separate = (penetration / touchDist) * 0.35 * (1 / mass) * delta;
+        particle.x += (dx / dist) * separate;
+        particle.y += (dy / dist) * separate;
       }
     }
 
