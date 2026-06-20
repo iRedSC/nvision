@@ -506,9 +506,9 @@ function simulateParticles(
   motion: number
 ): void {
   const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
-  const minDist = scale * 0.13;
+  const minDist = scale * 0.04;
   const spring = 0.0032 * motion;
-  const repulse = 0.11 * motion;
+  const repulse = 0.03 * motion;
   const damping = 0.88;
 
   for (const particle of particles) {
@@ -529,7 +529,7 @@ function simulateParticles(
       const dy = particle.y - other.y;
       const dist = Math.hypot(dx, dy);
       if (dist > 0.5 && dist < minDist) {
-        const push = ((minDist - dist) / minDist) ** 1.5 * repulse * delta;
+        const push = ((minDist - dist) / minDist) ** 1.2 * repulse * delta;
         particle.vx += (dx / dist) * push;
         particle.vy += (dy / dist) * push;
       }
