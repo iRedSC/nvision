@@ -45,6 +45,7 @@ const BASE_SCHEMA: HaFormSchema[] = [
       { name: "show_legend", selector: { boolean: {} } },
       { name: "show_cell_values", selector: { boolean: {} } },
       { name: "show_current", selector: { boolean: {} } },
+      { name: "dim_low_values", selector: { boolean: {} } },
     ],
   },
 ];
@@ -75,6 +76,7 @@ export class NvisionHeatMapCardEditor
       show_legend: true,
       show_current: true,
       show_cell_values: false,
+      dim_low_values: false,
       ...config,
       color_mode:
         config.color_mode === "primary" ? "theme" : config.color_mode,
@@ -131,6 +133,10 @@ export class NvisionHeatMapCardEditor
 
     if (schema.name === "show_cell_values") {
       return "Values in cells";
+    }
+
+    if (schema.name === "dim_low_values") {
+      return "Dim low values";
     }
 
     if (schema.name === "show_current") {
