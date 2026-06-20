@@ -110,8 +110,8 @@ function cellBackground(
   }
 
   const color = resolveHeatColor(host, level, mode, config);
-  const minMix = 10;
-  const maxMix = 65;
+  const minMix = 28;
+  const maxMix = 92;
   const span = maxMix - minMix;
   const mix = config.dim_low_values
     ? minMix + level * level * span

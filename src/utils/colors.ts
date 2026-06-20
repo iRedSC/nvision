@@ -148,7 +148,7 @@ export function temperatureGradientColor(
   return toRgb(mixRgb(warm, hot, (t - 0.5) * 2));
 }
 
-/** Subtle card background → primary accent. Default heat map palette. */
+/** Card background → primary accent. Default heat map palette. */
 export function themeHeatColor(host: HTMLElement, level: number): string {
   const primary = parseCssColor(
     readCssColor(host, "--primary-color", "#03a9f4")
@@ -156,12 +156,9 @@ export function themeHeatColor(host: HTMLElement, level: number): string {
   const cardBg = parseCssColor(
     readCssColor(host, "--card-background-color", "#1c1c1c")
   );
-  const inactive = parseCssColor(
-    readCssColor(host, "--state-inactive-color", "#6b7280")
-  );
   const t = Math.min(1, Math.max(0, level));
-  const floor = mixRgb(mixRgb(cardBg, inactive, 0.35), primary, 0.06);
-  return toRgb(mixRgb(floor, primary, 0.15 + t * 0.85));
+  const floor = mixRgb(cardBg, primary, 0.18);
+  return toRgb(mixRgb(floor, primary, 0.35 + t * 0.65));
 }
 
 export function customHeatColor(
