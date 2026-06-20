@@ -11,7 +11,12 @@ import {
   ActionHandlers,
   moreInfoInteractions,
 } from "../../utils/action-handlers";
-import { responsiveTypeStyles } from "../../utils/responsive-type";
+import {
+  responsiveTypeStyles,
+  responsiveStateIconStyles,
+  responsiveTileInfoStyles,
+} from "../../utils/responsive-type";
+import { formatStateWithUnit } from "../../utils/entity-state";
 import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
 import {
   DEFAULT_MAX,
@@ -24,9 +29,11 @@ import {
 } from "./const";
 import {
   drawReactor,
+  nearestParticles,
   syncParticles,
   updateParticles,
   updatePulses,
+  type ReactorConnection,
   type ReactorParticle,
   type ReactorPulse,
 } from "./reactor-particles";
@@ -95,6 +102,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: ReactorCoreCardConfig;
 
+  @state() private _nearestIds: string[] = ["", "", "", ""];
+
   @query(".stage") private _stage?: HTMLElement;
 
   @query("canvas") private _canvas?: HTMLCanvasElement;
@@ -107,6 +116,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
   private _pulses: ReactorPulse[] = [];
   private _entityKey = "";
   private _resizeObserver?: ResizeObserver;
+  private _cursorX = 0;
+  private _cursorY = 0;
 
   private _actions = new ActionHandlers(
     () => this,
@@ -139,6 +150,10 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     super.connectedCallback();
     this._lastFrame = 0;
     this._startAnimation();
+  }
+
+  firstUpdated(): void {
+    this._resetCursorToCenter();
   }
 
   disconnectedCallback(): void {
@@ -196,6 +211,96 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       height,
       timeMs
     );
+    this._updateNearest();
+  }
+
+  private _resetCursorToCenter(): void {
+    const { width, height } = this._canvasSize();
+    this._cursorX = width / 2;
+    this._cursorY = height / 2;
+    this._updateNearest();
+  }
+
+  private _updateNearest(): void {
+    const nearest = nearestParticles(
+      this._particles,
+      this._cursorX,
+      this._cursorY,
+      4
+    );
+    const ids = nearest.map((particle) => particle.entityId);
+    while (ids.length < 4) {
+      ids.push("");
+    }
+
+    const key = ids.join("|");
+    if (key !== this._nearestIds.join("|")) {
+      this._nearestIds = ids;
+    }
+  }
+
+  private _onPointerMove = (event: PointerEvent): void => {
+    const stage = this._stage;
+    if (!stage) {
+      return;
+    }
+
+    const rect = stage.getBoundingClientRect();
+    this._cursorX = event.clientX - rect.left;
+    this._cursorY = event.clientY - rect.top;
+    this._updateNearest();
+  };
+
+  private _onPointerLeave = (): void => {
+    this._resetCursorToCenter();
+  };
+
+  private _infoAnchors(): { x: number; y: number }[] {
+    const stage = this._stage;
+    if (!stage) {
+      return [];
+    }
+
+    const stageRect = stage.getBoundingClientRect();
+    const slots = this.shadowRoot?.querySelectorAll(".info-slot") ?? [];
+
+    return Array.from(slots).map((slot) => {
+      const rect = slot.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width / 2 - stageRect.left,
+        y: rect.top + 2 - stageRect.top,
+      };
+    });
+  }
+
+  private _buildConnections(): ReactorConnection[] {
+    const anchors = this._infoAnchors();
+    const connections: ReactorConnection[] = [];
+
+    for (let index = 0; index < 4; index += 1) {
+      const entityId = this._nearestIds[index];
+      if (!entityId) {
+        continue;
+      }
+
+      const particle = this._particles.find(
+        (entry) => entry.entityId === entityId
+      );
+      const anchor = anchors[index];
+      if (!particle?.placed || !anchor) {
+        continue;
+      }
+
+      connections.push({
+        fromX: particle.x,
+        fromY: particle.y,
+        toX: anchor.x,
+        toY: anchor.y,
+        seed: particle.seed,
+      });
+    }
+
+    return connections;
   }
 
   private _ensureCanvas(): void {
@@ -298,7 +403,15 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       reducedMotion
     );
     updatePulses(this._pulses, deltaMs);
-    drawReactor(ctx, this._particles, this._pulses, width, height, timeMs);
+    drawReactor(
+      ctx,
+      this._particles,
+      this._pulses,
+      width,
+      height,
+      timeMs,
+      this._buildConnections()
+    );
   }
 
   protected render() {
@@ -307,12 +420,9 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     const title = this._config.name || "Reactor Core";
-    const count =
-      this._particles.length ||
-      discoverIds(this.hass, this._config).length;
 
     return html`
-      <ha-card>
+      <ha-card aria-label=${title}>
         <div class="stage">
           <canvas aria-hidden="true"></canvas>
           <div
@@ -324,11 +434,39 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
             @keydown=${this._actions.bind().keydown}
             @pointerdown=${this._actions.bind().pointerdown}
             @pointerup=${this._actions.bind().pointerup}
-            @pointerleave=${this._actions.bind().pointerleave}
+            @pointerleave=${this._onPointerLeave}
             @pointercancel=${this._actions.bind().pointercancel}
+            @pointermove=${this._onPointerMove}
           >
-            <span class="title">${title}</span>
-            <span class="count">${count} sensors</span>
+            <div class="info-bar">
+              ${this._nearestIds.map((entityId, index) => {
+                const stateObj = entityId
+                  ? this.hass.states[entityId]
+                  : undefined;
+
+                return html`
+                  <div
+                    class="info-slot ${entityId ? "active" : ""}"
+                    data-slot=${index}
+                    @click=${(event: Event) => event.stopPropagation()}
+                  >
+                    ${stateObj
+                      ? html`
+                          <ha-state-icon
+                            .hass=${this.hass}
+                            .stateObj=${stateObj}
+                          ></ha-state-icon>
+                          <ha-tile-info
+                            .primary=${stateObj.attributes.friendly_name ??
+                            entityId}
+                            .secondary=${formatStateWithUnit(stateObj)}
+                          ></ha-tile-info>
+                        `
+                      : html`<span class="info-empty">—</span>`}
+                  </div>
+                `;
+              })}
+            </div>
           </div>
         </div>
       </ha-card>
@@ -337,6 +475,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   static styles = [
     responsiveTypeStyles,
+    responsiveTileInfoStyles,
+    responsiveStateIconStyles,
     css`
       :host {
         display: block;
@@ -373,28 +513,57 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
-        padding: 10px 12px;
+        padding: 8px 6px;
         box-sizing: border-box;
-        cursor: pointer;
+        cursor: crosshair;
         background: linear-gradient(
           to top,
-          rgba(0, 0, 0, 0.28),
+          rgba(0, 0, 0, 0.34),
           rgba(0, 0, 0, 0)
         );
       }
 
-      .title {
-        font-size: var(--nv-label-font-size, 0.95rem);
-        font-weight: 500;
-        color: var(--primary-text-color);
-        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+      .info-bar {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+        width: 100%;
       }
 
-      .count {
-        margin-top: 2px;
+      .info-slot {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        min-width: 0;
+        min-height: 52px;
+        padding: 6px 4px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.28);
+        text-align: center;
+        pointer-events: none;
+      }
+
+      .info-slot.active {
+        background: rgba(0, 0, 0, 0.42);
+      }
+
+      .info-slot ha-state-icon {
+        --mdc-icon-size: 18px;
+        opacity: 0.92;
+      }
+
+      .info-slot ha-tile-info {
+        width: 100%;
+        --ha-tile-info-primary-font-size: var(--nv-label-font-size, 0.72rem);
+        --ha-tile-info-secondary-font-size: var(--nv-subtitle-font-size, 0.66rem);
+      }
+
+      .info-empty {
         font-size: var(--nv-subtitle-font-size, 0.78rem);
         color: var(--secondary-text-color);
-        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+        opacity: 0.55;
       }
     `,
   ];

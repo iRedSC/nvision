@@ -253,11 +253,12 @@ function layoutMetrics(
   clampY: number;
 } {
   const cx = width / 2;
-  const cy = height / 2;
+  const infoReserve = Math.min(height * 0.22, 72);
+  const cy = (height - infoReserve) / 2;
   const padX = Math.max(10, width * 0.06);
-  const padY = Math.max(10, height * 0.06);
+  const padY = Math.max(10, height * 0.06 + infoReserve * 0.35);
   const halfW = Math.max(1, width / 2 - padX);
-  const halfH = Math.max(1, height / 2 - padY);
+  const halfH = Math.max(1, (height - infoReserve) / 2 - padY);
   return {
     cx,
     cy,
@@ -615,13 +616,62 @@ export function drawPulses(
   }
 }
 
+export interface ReactorConnection {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  seed: number;
+}
+
+export function nearestParticles(
+  particles: ReactorParticle[],
+  x: number,
+  y: number,
+  count: number
+): ReactorParticle[] {
+  return [...particles]
+    .filter((particle) => particle.placed)
+    .sort((a, b) => {
+      const da = (a.x - x) ** 2 + (a.y - y) ** 2;
+      const db = (b.x - x) ** 2 + (b.y - y) ** 2;
+      return da - db;
+    })
+    .slice(0, count);
+}
+
+function drawConnections(
+  ctx: CanvasRenderingContext2D,
+  connections: ReactorConnection[],
+  scale: number,
+  timeMs: number
+): void {
+  for (const connection of connections) {
+    const hue = pulseHue(connection.seed, timeMs);
+    const color = `hsla(${hue}, 78%, 62%, 0.42)`;
+
+    ctx.beginPath();
+    ctx.moveTo(connection.fromX, connection.fromY);
+    ctx.lineTo(connection.toX, connection.toY);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(connection.toX, connection.toY, scale * 0.0045, 0, TAU);
+    ctx.fillStyle = color.replace(/[\d.]+\)$/, "0.65)");
+    ctx.fill();
+  }
+}
+
 export function drawReactor(
   ctx: CanvasRenderingContext2D,
   particles: ReactorParticle[],
   pulses: ReactorPulse[],
   width: number,
   height: number,
-  timeMs: number
+  timeMs: number,
+  connections: ReactorConnection[] = []
 ): void {
   const { cx, cy, scale } = layoutMetrics(width, height);
 
@@ -651,6 +701,10 @@ export function drawReactor(
         drawDefaultParticle(ctx, particle, scale, timeMs);
         break;
     }
+  }
+
+  if (connections.length) {
+    drawConnections(ctx, connections, scale, timeMs);
   }
 
   const corePulse = 0.55 + Math.sin(timeMs * 0.0018) * 0.12;
