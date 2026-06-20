@@ -55,6 +55,13 @@ export interface ReactorParticle {
 const PALETTE_HUES = [185, 198, 215, 248, 278, 312, 42];
 const TAU = Math.PI * 2;
 
+/** Steady off-state for toggles — also used as the dim phase of on-state flashes. */
+const OFF_ORB_SAT = 38;
+const OFF_ORB_LIGHT = 36;
+const OFF_ORB_ALPHA = 0.34;
+const OFF_ORB_HALO_SCALE = 1.1;
+const OFF_ORB_HALO_ALPHA = 0.06;
+
 function hashSeed(value: string): number {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i += 1) {
@@ -436,27 +443,30 @@ function toggleOrbLayers(
   const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 12);
   const bright = (pulse + 1) / 2;
   const hue = pulseHue(particle.seed, timeMs);
-  const coreSat = particle.unavailable ? 18 : particle.isOn ? 88 : 38;
-
+  const coreSat = particle.unavailable
+    ? 18
+    : particle.isOn
+      ? OFF_ORB_SAT + bright * (88 - OFF_ORB_SAT)
+      : OFF_ORB_SAT;
   const coreLight = particle.unavailable
     ? 42
     : particle.isOn
-      ? 54 + bright * 4
-      : 36;
+      ? OFF_ORB_LIGHT + bright * (58 - OFF_ORB_LIGHT)
+      : OFF_ORB_LIGHT;
   const coreAlpha = particle.unavailable
     ? 0.18
     : particle.isOn
-      ? 0.78 + bright * 0.12
-      : 0.34;
+      ? OFF_ORB_ALPHA + bright * (0.78 - OFF_ORB_ALPHA)
+      : OFF_ORB_ALPHA;
   const coreColor = `hsla(${hue}, ${coreSat}%, ${coreLight}%, ${coreAlpha})`;
 
   const haloRadius = particle.unavailable
     ? coreRadius * 1.08
     : particle.isOn
-      ? coreRadius * (1.85 + bright * 0.75)
-      : coreRadius * 1.1;
+      ? coreRadius * (OFF_ORB_HALO_SCALE + bright * 0.4)
+      : coreRadius * OFF_ORB_HALO_SCALE;
   const haloColor = `hsla(${hue}, ${coreSat}%, ${Math.max(coreLight - 6, 40)}%, ${
-    particle.isOn ? 0.08 + bright * 0.1 : 0.06
+    particle.isOn ? OFF_ORB_HALO_ALPHA + bright * 0.12 : OFF_ORB_HALO_ALPHA
   })`;
 
   return {
@@ -532,18 +542,26 @@ function timerOrbLayers(
   const flashSpeed = 0.005 + urgency * 0.048;
   const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 10);
   const bright = (pulse + 1) / 2;
-  const hueShift = pulse * (24 + urgency * 36);
+  const hueShift = bright * pulse * (24 + urgency * 36);
   const baseHue = pulseHue(particle.seed, timeMs);
   const hue = (baseHue + hueShift + 360) % 360;
-  const coreLight = particle.unavailable ? 42 : 52 + urgency * 6;
-  const regularAlpha = particle.unavailable ? 0.25 : 0.38 + urgency * 0.24;
-  const coreAlpha = regularAlpha * (0.55 + bright * 0.45);
-  const coreColor = `hsla(${hue}, 88%, ${coreLight}%, ${coreAlpha})`;
+  const peakLight = 52 + urgency * 6;
+  const peakAlpha = 0.38 + urgency * 0.24;
+  const coreSat = particle.unavailable
+    ? 18
+    : OFF_ORB_SAT + bright * (88 - OFF_ORB_SAT);
+  const coreLight = particle.unavailable
+    ? 42
+    : OFF_ORB_LIGHT + bright * (peakLight - OFF_ORB_LIGHT);
+  const coreAlpha = particle.unavailable
+    ? 0.25
+    : OFF_ORB_ALPHA + bright * (peakAlpha - OFF_ORB_ALPHA);
+  const coreColor = `hsla(${hue}, ${coreSat}%, ${coreLight}%, ${coreAlpha})`;
   const haloRadius = particle.unavailable
     ? coreRadius * 1.08
-    : coreRadius * (1.35 + bright * (0.75 + urgency * 1.35));
-  const haloColor = `hsla(${hue}, 84%, ${coreLight - 4}%, ${
-    0.07 + bright * (0.08 + urgency * 0.12)
+    : coreRadius * (OFF_ORB_HALO_SCALE + bright * (0.35 + urgency * 0.45));
+  const haloColor = `hsla(${hue}, ${coreSat}%, ${Math.max(coreLight - 4, 40)}%, ${
+    OFF_ORB_HALO_ALPHA + bright * (0.08 + urgency * 0.12)
   })`;
 
   return {
@@ -639,9 +657,9 @@ function simulateParticles(
   motion: number
 ): void {
   const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
-  const minDist = scale * 0.04;
+  const minDist = scale * 0.08;
   const spring = 0.0032 * motion;
-  const repulse = 0.03 * motion;
+  const repulse = 0.018 * motion;
   const damping = 0.88;
 
   for (const particle of particles) {
