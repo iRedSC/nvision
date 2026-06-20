@@ -190,7 +190,7 @@ export function appendChaoticArcs(
   const t = Math.min(1, severity / 2);
   const count = Math.min(6, Math.max(1, Math.round(0.35 + t * 3.5)));
 
-  const lengthMin = 0.14;
+  const lengthMin = 0.2;
   const lengthMax = 1;
   const lengthT = lengthMin + t * (lengthMax - lengthMin);
   const flickerRate = 1.2 + t * 1.4;
@@ -464,6 +464,7 @@ export class PowerLightningRenderer {
 
     if (!this._resizeObserver) {
       this._resizeObserver = new ResizeObserver(() => this._resizeCanvas());
+      this._resizeObserver.observe(canvas);
       this._resizeObserver.observe(canvas.parentElement ?? this._host);
       this._resizeCanvas();
     }
