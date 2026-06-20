@@ -504,7 +504,7 @@ export function contentFade(
 ): number {
     const fadeStart = width * 0.04;
     const fadeEnd = width * 0.58;
-    let horizontal = 1; //
+    let horizontal = 1;
 
     if (x < fadeEnd) {
         horizontal =
