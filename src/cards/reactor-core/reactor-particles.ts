@@ -134,9 +134,6 @@ function orbRadiusForSpeed(particle: ReactorParticle, scale: number): number {
   if (particle.kind === "numeric") {
     return numericRadius(scale, particle.numericNorm);
   }
-  if (particle.kind === "light") {
-    return scale * (0.008 + particle.lightBrightness * 0.024);
-  }
   return defaultOrbRadius(scale, particle.kind);
 }
 
@@ -392,14 +389,36 @@ function drawGlowDot(
   glow: number,
   haloScale = 0.5
 ): void {
-  ctx.beginPath();
-  ctx.arc(x, y, radius * (1 + glow * haloScale), 0, TAU);
-  ctx.fillStyle = color.replace(/[\d.]+\)$/, `${0.07 + glow * 0.1})`);
-  ctx.fill();
+  drawDualOrb(
+    ctx,
+    x,
+    y,
+    radius,
+    color,
+    radius * (1 + glow * haloScale),
+    color.replace(/[\d.]+\)$/, `${0.07 + glow * 0.1})`)
+  );
+}
+
+function drawDualOrb(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  coreRadius: number,
+  coreColor: string,
+  haloRadius: number,
+  haloColor?: string
+): void {
+  if (haloRadius > coreRadius * 1.02) {
+    ctx.beginPath();
+    ctx.arc(x, y, haloRadius, 0, TAU);
+    ctx.fillStyle = haloColor ?? coreColor.replace(/[\d.]+\)$/, "0.18)");
+    ctx.fill();
+  }
 
   ctx.beginPath();
-  ctx.arc(x, y, radius, 0, TAU);
-  ctx.fillStyle = color;
+  ctx.arc(x, y, coreRadius, 0, TAU);
+  ctx.fillStyle = coreColor;
   ctx.fill();
 }
 
@@ -410,19 +429,34 @@ function drawToggleParticle(
   timeMs: number
 ): void {
   const coreRadius = defaultOrbRadius(scale, "toggle");
-  const flashSpeed = particle.isOn ? 0.012 : 0.007;
+  const flashSpeed = particle.isOn ? 0.014 : 0.007;
   const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 12);
-  const haloGlow = particle.isOn
-    ? 0.38 + pulse * 0.48
-    : 0.06 + pulse * 0.06;
+  const bright = (pulse + 1) / 2;
   const hue = pulseHue(particle.seed, timeMs);
-  const coreAlpha = particle.isOn ? 0.92 : 0.34;
 
-  const color = particle.unavailable
-    ? `hsla(${hue}, 18%, 42%, ${coreAlpha * 0.4})`
-    : `hsla(${hue}, ${particle.isOn ? 90 : 38}%, ${particle.isOn ? 65 : 36}%, ${coreAlpha})`;
+  const coreLight = particle.unavailable
+    ? 42
+    : particle.isOn
+      ? 38 + bright * 42
+      : 36;
+  const coreAlpha = particle.unavailable
+    ? 0.18
+    : particle.isOn
+      ? 0.42 + bright * 0.52
+      : 0.34;
+  const coreSat = particle.unavailable ? 18 : particle.isOn ? 90 : 38;
 
-  drawGlowDot(ctx, particle.x, particle.y, coreRadius, color, haloGlow);
+  const coreColor = `hsla(${hue}, ${coreSat}%, ${coreLight}%, ${coreAlpha})`;
+  const haloRadius = particle.unavailable
+    ? coreRadius * 1.08
+    : particle.isOn
+      ? coreRadius * (1.85 + bright * 0.75)
+      : coreRadius * 1.1;
+  const haloColor = `hsla(${hue}, ${coreSat}%, ${coreLight + 8}%, ${
+    particle.isOn ? 0.1 + bright * 0.14 : 0.06
+  })`;
+
+  drawDualOrb(ctx, particle.x, particle.y, coreRadius, coreColor, haloRadius, haloColor);
 }
 
 function drawLightParticle(
@@ -432,19 +466,26 @@ function drawLightParticle(
   timeMs: number
 ): void {
   const brightness = particle.lightBrightness;
-  const radius = scale * (0.008 + brightness * 0.024);
+  const coreRadius = defaultOrbRadius(scale, "light");
   const alpha = particle.unavailable
     ? 0.25
     : particle.isOn
-      ? 0.22 + brightness * 0.72
+      ? 0.62 + brightness * 0.28
       : 0.18;
   const color =
     particle.lightColor ??
     (particle.isOn
       ? "rgb(255, 183, 77)"
       : paletteColor(particle, timeMs, 0.25));
+  const coreColor = withAlpha(color, alpha);
+  const haloRadius = particle.unavailable
+    ? coreRadius * 1.08
+    : particle.isOn
+      ? coreRadius * (1.35 + brightness * 2.15)
+      : coreRadius * 1.08;
+  const haloColor = withAlpha(color, particle.isOn ? 0.08 + brightness * 0.16 : 0.05);
 
-  drawGlowDot(ctx, particle.x, particle.y, radius, withAlpha(color, alpha), alpha);
+  drawDualOrb(ctx, particle.x, particle.y, coreRadius, coreColor, haloRadius, haloColor);
 }
 
 function drawTimerParticle(
@@ -454,22 +495,23 @@ function drawTimerParticle(
   timeMs: number
 ): void {
   const urgency = particle.timerUrgency;
+  const coreRadius = defaultOrbRadius(scale, "timer");
   const flashSpeed = 0.005 + urgency * 0.048;
   const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 10);
-  const sizePulse = 1 + pulse * (0.15 + urgency * 0.35);
-  const coreAlpha = particle.unavailable ? 0.25 : 0.35 + urgency * 0.25;
-  const glow = (0.22 + pulse * 0.3) * (0.3 + urgency * 0.7) * sizePulse;
-  const radius = defaultOrbRadius(scale, "timer") * sizePulse;
-  const hue = pulseHue(particle.seed, timeMs);
+  const bright = (pulse + 1) / 2;
+  const hueShift = pulse * (24 + urgency * 36);
+  const baseHue = pulseHue(particle.seed, timeMs);
+  const hue = (baseHue + hueShift + 360) % 360;
+  const coreAlpha = particle.unavailable ? 0.25 : 0.42 + urgency * 0.28;
+  const coreColor = `hsla(${hue}, 86%, ${54 + urgency * 12}%, ${coreAlpha})`;
+  const haloRadius = particle.unavailable
+    ? coreRadius * 1.08
+    : coreRadius * (1.35 + bright * (0.75 + urgency * 1.35));
+  const haloColor = `hsla(${hue}, 82%, ${58 + urgency * 10}%, ${
+    0.08 + bright * (0.1 + urgency * 0.14)
+  })`;
 
-  drawGlowDot(
-    ctx,
-    particle.x,
-    particle.y,
-    radius,
-    `hsla(${hue}, 86%, ${58 + urgency * 12}%, ${coreAlpha})`,
-    glow
-  );
+  drawDualOrb(ctx, particle.x, particle.y, coreRadius, coreColor, haloRadius, haloColor);
 }
 
 function drawDefaultParticle(
