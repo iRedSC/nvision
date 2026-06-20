@@ -17,7 +17,7 @@ import {
 import { registerCustomCard } from "../../utils/custom-cards";
 import { formatStateWithUnit } from "../../utils/entity-state";
 import {
-  buildHeatMapGrid,
+  buildHeatMapGridAsync,
   normalizeLevel,
   PERIOD_HOURS,
   resolveAxes,
@@ -359,6 +359,23 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     super.disconnectedCallback();
   }
 
+  protected shouldUpdate(changed: Map<string, unknown>): boolean {
+    if (changed.size !== 1 || !changed.has("hass")) {
+      return true;
+    }
+
+    const oldHass = changed.get("hass") as HomeAssistant | undefined;
+    const entity = this._config?.entity;
+    if (!oldHass || !this.hass || !entity) {
+      return true;
+    }
+
+    return (
+      oldHass.states[entity] !== this.hass.states[entity] ||
+      oldHass.config.time_zone !== this.hass.config.time_zone
+    );
+  }
+
   protected updated(changed: Map<string, unknown>): void {
     if (changed.has("_config") || changed.has("hass")) {
       const loadKey = this._computeLoadKey();
@@ -414,11 +431,13 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     this._observeGridWrap(wrap);
 
-    const cells = root.querySelectorAll(".data-grid .cell, .timeline-grid .cell");
+    const nextCell =
+      root.querySelector(".data-grid .cell + .cell") ??
+      root.querySelector(".timeline-slot + .timeline-slot .cell");
     let slotWidth = sampleCell.getBoundingClientRect().width;
-    if (cells.length > 1) {
-      const first = cells[0].getBoundingClientRect();
-      const second = cells[1].getBoundingClientRect();
+    if (nextCell) {
+      const first = sampleCell.getBoundingClientRect();
+      const second = nextCell.getBoundingClientRect();
       slotWidth = second.left - first.left;
     }
 
@@ -476,15 +495,25 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
         return;
       }
 
-      this._grid = buildHeatMapGrid(
+      const grid = await buildHeatMapGridAsync(
         points,
         axes.x,
         axes.y,
         axes.period,
         aggregate,
         hass.config.time_zone || "UTC",
-        firstWeekday(hass)
+        firstWeekday(hass),
+        {
+          shouldContinue: () => fetchVersion === this._fetchVersion,
+          yieldToMain,
+        }
       );
+
+      if (fetchVersion !== this._fetchVersion || !grid) {
+        return;
+      }
+
+      this._grid = grid;
     } catch (error) {
       if (fetchVersion !== this._fetchVersion) {
         return;

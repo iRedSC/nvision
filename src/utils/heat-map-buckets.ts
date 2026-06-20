@@ -553,49 +553,98 @@ export function resolveAxes(
   return PRESET_AXES[key as keyof typeof PRESET_AXES];
 }
 
-export function buildHeatMapGrid(
-  points: HistoryPoint[],
+interface HeatMapBuildState {
+  window: PeriodWindow;
+  bucketMs: number;
+  xAxis: ReturnType<typeof buildAxis>;
+  yAxis: ReturnType<typeof buildAxis>;
+  xKeySet: Set<string>;
+  yKeySet: Set<string>;
+  bucketMap: Map<string, BucketSample[]>;
+}
+
+interface BuildHeatMapGridAsyncOptions {
+  minOverride?: number;
+  maxOverride?: number;
+  yieldEvery?: number;
+  yieldToMain?: () => Promise<void>;
+  shouldContinue?: () => boolean;
+}
+
+function createHeatMapBuildState(
   xField: AxisField,
   yField: AxisField,
   period: PeriodPreset,
-  aggregate: AggregateType,
   timeZone: string,
-  firstWeekday = 0,
-  minOverride?: number,
-  maxOverride?: number
-): HeatMapGrid {
+  firstWeekday: number
+): HeatMapBuildState {
   const window = periodWindow(PERIOD_HOURS[period]);
   const bucketMs = timeBucketMs(window.hours);
   const xAxis = buildAxis(xField, window, timeZone, firstWeekday, bucketMs);
   const yAxis = buildAxis(yField, window, timeZone, firstWeekday, bucketMs);
-  const xKeySet = new Set(xAxis.keys);
-  const yKeySet = new Set(yAxis.keys);
-  const bucketMap = new Map<string, BucketSample[]>();
 
-  for (const point of points) {
-    if (point.time < window.startMs || point.time > window.endMs) {
-      continue;
-    }
+  return {
+    window,
+    bucketMs,
+    xAxis,
+    yAxis,
+    xKeySet: new Set(xAxis.keys),
+    yKeySet: new Set(yAxis.keys),
+    bucketMap: new Map<string, BucketSample[]>(),
+  };
+}
 
-    const xKey = axisKey(xField, point.time, timeZone, bucketMs, firstWeekday);
-    const yKey = axisKey(yField, point.time, timeZone, bucketMs, firstWeekday);
-    if (xKey === undefined || yKey === undefined) {
-      continue;
-    }
-    if (!xKeySet.has(xKey) || !yKeySet.has(yKey)) {
-      continue;
-    }
-
-    const key = `${yKey}|${xKey}`;
-    const bucket = bucketMap.get(key) ?? [];
-    bucket.push({ time: point.time, value: point.value });
-    bucketMap.set(key, bucket);
+function addPointToHeatMapBuckets(
+  state: HeatMapBuildState,
+  point: HistoryPoint,
+  xField: AxisField,
+  yField: AxisField,
+  timeZone: string,
+  firstWeekday: number
+): void {
+  if (point.time < state.window.startMs || point.time > state.window.endMs) {
+    return;
   }
 
+  const xKey = axisKey(
+    xField,
+    point.time,
+    timeZone,
+    state.bucketMs,
+    firstWeekday
+  );
+  const yKey = axisKey(
+    yField,
+    point.time,
+    timeZone,
+    state.bucketMs,
+    firstWeekday
+  );
+  if (xKey === undefined || yKey === undefined) {
+    return;
+  }
+  if (!state.xKeySet.has(xKey) || !state.yKeySet.has(yKey)) {
+    return;
+  }
+
+  const key = `${yKey}|${xKey}`;
+  const bucket = state.bucketMap.get(key) ?? [];
+  bucket.push({ time: point.time, value: point.value });
+  state.bucketMap.set(key, bucket);
+}
+
+function finishHeatMapGrid(
+  state: HeatMapBuildState,
+  xField: AxisField,
+  yField: AxisField,
+  aggregate: AggregateType,
+  minOverride?: number,
+  maxOverride?: number
+): HeatMapGrid {
   const values: number[] = [];
-  const cells: HeatMapCellMeta[][] = yAxis.keys.map((yKey, yIndex) =>
-    xAxis.keys.map((xKey, xIndex) => {
-      const bucket = bucketMap.get(`${yKey}|${xKey}`) ?? [];
+  const cells: HeatMapCellMeta[][] = state.yAxis.keys.map((yKey, yIndex) =>
+    state.xAxis.keys.map((xKey, xIndex) => {
+      const bucket = state.bucketMap.get(`${yKey}|${xKey}`) ?? [];
       const value = aggregateSamples(bucket, aggregate);
       if (value !== null) {
         values.push(value);
@@ -608,9 +657,9 @@ export function buildHeatMapGrid(
           yField,
           xKey,
           yKey,
-          xAxis.labels[xIndex],
-          yAxis.labels[yIndex],
-          xAxis.bucketRanges
+          state.xAxis.labels[xIndex],
+          state.yAxis.labels[yIndex],
+          state.xAxis.bucketRanges
         ),
       };
     })
@@ -631,14 +680,106 @@ export function buildHeatMapGrid(
   }
 
   return {
-    xLabels: xAxis.labels,
-    yLabels: yAxis.labels,
-    xKeys: xAxis.keys,
-    yKeys: yAxis.keys,
+    xLabels: state.xAxis.labels,
+    yLabels: state.yAxis.labels,
+    xKeys: state.xAxis.keys,
+    yKeys: state.yAxis.keys,
     cells,
     min,
     max,
   };
+}
+
+export function buildHeatMapGrid(
+  points: HistoryPoint[],
+  xField: AxisField,
+  yField: AxisField,
+  period: PeriodPreset,
+  aggregate: AggregateType,
+  timeZone: string,
+  firstWeekday = 0,
+  minOverride?: number,
+  maxOverride?: number
+): HeatMapGrid {
+  const state = createHeatMapBuildState(
+    xField,
+    yField,
+    period,
+    timeZone,
+    firstWeekday
+  );
+
+  for (const point of points) {
+    addPointToHeatMapBuckets(
+      state,
+      point,
+      xField,
+      yField,
+      timeZone,
+      firstWeekday
+    );
+  }
+
+  return finishHeatMapGrid(
+    state,
+    xField,
+    yField,
+    aggregate,
+    minOverride,
+    maxOverride
+  );
+}
+
+export async function buildHeatMapGridAsync(
+  points: HistoryPoint[],
+  xField: AxisField,
+  yField: AxisField,
+  period: PeriodPreset,
+  aggregate: AggregateType,
+  timeZone: string,
+  firstWeekday = 0,
+  options: BuildHeatMapGridAsyncOptions = {}
+): Promise<HeatMapGrid | undefined> {
+  const state = createHeatMapBuildState(
+    xField,
+    yField,
+    period,
+    timeZone,
+    firstWeekday
+  );
+  const yieldEvery = options.yieldEvery ?? 250;
+
+  for (let index = 0; index < points.length; index++) {
+    if (options.shouldContinue?.() === false) {
+      return undefined;
+    }
+
+    addPointToHeatMapBuckets(
+      state,
+      points[index],
+      xField,
+      yField,
+      timeZone,
+      firstWeekday
+    );
+
+    if (options.yieldToMain && (index + 1) % yieldEvery === 0) {
+      await options.yieldToMain();
+    }
+  }
+
+  if (options.shouldContinue?.() === false) {
+    return undefined;
+  }
+
+  return finishHeatMapGrid(
+    state,
+    xField,
+    yField,
+    aggregate,
+    options.minOverride,
+    options.maxOverride
+  );
 }
 
 export function normalizeLevel(
