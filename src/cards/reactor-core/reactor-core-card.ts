@@ -28,6 +28,8 @@ import {
   DEFAULT_SHOW_INFO,
   DEFAULT_SHOW_INFO_CHANGE,
   INFO_RANDOM_INTERVAL_MS,
+  NEAREST_CURSOR_MOVE_THRESHOLD,
+  NEAREST_CURSOR_SWAP_MARGIN,
   REACTOR_CORE_CARD_EDITOR_NAME,
   REACTOR_CORE_CARD_NAME,
   REACTOR_ENTITY_DOMAINS,
@@ -127,6 +129,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
   private _slotAge = Array(INFO_SLOT_COUNT).fill(0);
   private _pointerX?: number;
   private _pointerY?: number;
+  private _lastNearestPick?: { x: number; y: number };
   private _lastRandomPickMs = 0;
 
   private _actions = new ActionHandlers(
@@ -150,6 +153,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     this._entityKey = "";
     this._pulses = [];
     this._lastRandomPickMs = 0;
+    this._lastNearestPick = undefined;
     this._infoChangeFrom = {};
   }
 
@@ -422,18 +426,77 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     this._lastRandomPickMs = timeMs;
   }
 
-  private _updateNearestSlots(targetX: number, targetY: number): void {
-    const nearest = this._particles
+  private _pickNearestSlots(
+    targetX: number,
+    targetY: number,
+    force = false
+  ): void {
+    const ranked = this._particles
       .filter((particle) => particle.placed)
       .map((particle) => ({
         entityId: particle.entityId,
         distance: Math.hypot(particle.x - targetX, particle.y - targetY),
       }))
-      .sort((left, right) => left.distance - right.distance)
-      .slice(0, INFO_SLOT_COUNT)
-      .map((entry) => entry.entityId);
+      .sort((left, right) => left.distance - right.distance);
 
-    this._setSlotIds(nearest);
+    if (!ranked.length) {
+      return;
+    }
+
+    const current = this._slotIds.filter(Boolean);
+
+    if (!current.length || force) {
+      this._setSlotIds(ranked.slice(0, INFO_SLOT_COUNT).map((entry) => entry.entityId));
+      this._lastNearestPick = { x: targetX, y: targetY };
+      return;
+    }
+
+    if (!force && this._lastNearestPick) {
+      const moved = Math.hypot(
+        targetX - this._lastNearestPick.x,
+        targetY - this._lastNearestPick.y
+      );
+      if (moved < NEAREST_CURSOR_MOVE_THRESHOLD) {
+        return;
+      }
+    }
+
+    const byId = new Map(
+      ranked.map((entry) => [entry.entityId, entry.distance])
+    );
+    const selected = new Set(current);
+    const next = [...current];
+
+    for (const candidate of ranked) {
+      if (selected.has(candidate.entityId)) {
+        continue;
+      }
+
+      if (next.length < INFO_SLOT_COUNT) {
+        next.push(candidate.entityId);
+        selected.add(candidate.entityId);
+        continue;
+      }
+
+      let furthestIndex = 0;
+      let furthestDistance = byId.get(next[0]!) ?? Infinity;
+      for (let index = 1; index < next.length; index += 1) {
+        const distance = byId.get(next[index]!) ?? Infinity;
+        if (distance > furthestDistance) {
+          furthestDistance = distance;
+          furthestIndex = index;
+        }
+      }
+
+      if (candidate.distance + NEAREST_CURSOR_SWAP_MARGIN < furthestDistance) {
+        selected.delete(next[furthestIndex]!);
+        next[furthestIndex] = candidate.entityId;
+        selected.add(candidate.entityId);
+      }
+    }
+
+    this._setSlotIds(next);
+    this._lastNearestPick = { x: targetX, y: targetY };
   }
 
   private _refreshInfoSlots(
@@ -453,10 +516,15 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       return;
     }
 
-    if (selection === "nearest_cursor") {
-      this._updateNearestSlots(
+    if (
+      selection === "nearest_cursor" &&
+      !this._slotIds.some(Boolean) &&
+      this._particles.some((particle) => particle.placed)
+    ) {
+      this._pickNearestSlots(
         this._pointerX ?? width / 2,
-        this._pointerY ?? height / 2
+        this._pointerY ?? height / 2,
+        true
       );
     }
   }
@@ -468,8 +536,14 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     const rect = stage.getBoundingClientRect();
-    this._pointerX = event.clientX - rect.left;
-    this._pointerY = event.clientY - rect.top;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    this._pointerX = x;
+    this._pointerY = y;
+
+    if (this._infoSelection() === "nearest_cursor") {
+      this._pickNearestSlots(x, y);
+    }
   }
 
   private _infoAnchors(): { x: number; y: number }[] {
