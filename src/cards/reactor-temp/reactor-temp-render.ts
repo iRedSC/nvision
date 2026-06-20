@@ -12,18 +12,17 @@ export interface ReactorTempDrawState {
   reducedMotion: boolean;
 }
 
-const ORB_COUNT = 7;
+const LAYER_COUNT = 5;
 
-/** Distinct plasma tones from stable coolant through critical heat. */
+/** Coolant blues through critical crimson — no white stops. */
 const PLASMA: Array<[number, number, number]> = [
   [118, 198, 255],
   [72, 152, 238],
   [48, 214, 196],
-  [255, 176, 58],
-  [255, 96, 36],
-  [255, 48, 72],
-  [220, 36, 28],
-  [180, 22, 38],
+  [255, 140, 42],
+  [255, 78, 28],
+  [220, 32, 24],
+  [168, 18, 34],
 ];
 
 function fract(value: number): number {
@@ -51,61 +50,97 @@ function smoothstep(value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function orbCriticalColor(
+function layerColor(
   tempNorm: number,
-  orbIndex: number,
-  orbCount: number
+  layerIndex: number
 ): [number, number, number] {
   const heat = smoothstep(tempNorm);
-  const cold = PLASMA[orbIndex % 3];
-  const hotSlot =
-    3 +
-    ((orbIndex * 2 + Math.floor(heat * 3)) % (PLASMA.length - 3));
-  const hot = PLASMA[hotSlot];
+  const cold = PLASMA[layerIndex % 3];
+  const hot = PLASMA[3 + (layerIndex % (PLASMA.length - 3))];
 
-  if (heat < 0.28) {
-    return mixRgb(cold, PLASMA[2], heat / 0.28);
+  if (heat < 0.32) {
+    return mixRgb(cold, PLASMA[2], heat / 0.32);
   }
 
-  if (heat < 0.58) {
-    const local = (heat - 0.28) / 0.3;
-    return mixRgb(PLASMA[2], hot, local);
+  if (heat < 0.68) {
+    return mixRgb(PLASMA[2], hot, (heat - 0.32) / 0.36);
   }
 
-  if (heat < 0.82) {
-    const local = (heat - 0.58) / 0.24;
-    return mixRgb(hot, PLASMA[5 + (orbIndex % 2)], local);
-  }
-
-  const local = (heat - 0.82) / 0.18;
-  const critical = mixRgb(PLASMA[5 + (orbIndex % 2)], PLASMA[6 + (orbIndex % 2)], local);
-  return mixRgb(critical, PLASMA[4], (orbIndex / Math.max(1, orbCount - 1)) * 0.18);
+  const critical = mixRgb(hot, PLASMA[PLASMA.length - 1], (heat - 0.68) / 0.32);
+  return mixRgb(critical, PLASMA[5], layerIndex * 0.04);
 }
 
-function drawBlob(
+function writheRadius(
+  angle: number,
+  radius: number,
+  phase: number,
+  writhe: number
+): number {
+  const edge =
+    1 +
+    Math.sin(angle * 3 + phase * 1.1) * 0.055 * writhe +
+    Math.sin(angle * 5 - phase * 0.85) * 0.035 * writhe +
+    Math.cos(angle * 2 + phase * 0.6) * 0.04 * writhe;
+  return radius * edge;
+}
+
+function traceWrithingPath(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  phase: number,
+  writhe: number
+): void {
+  const segments = 64;
+  ctx.beginPath();
+
+  for (let index = 0; index <= segments; index++) {
+    const angle = (index / segments) * Math.PI * 2;
+    const dist = writheRadius(angle, radius, phase, writhe);
+    const x = cx + Math.cos(angle) * dist;
+    const y = cy + Math.sin(angle) * dist;
+
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+
+  ctx.closePath();
+}
+
+function internalLayerCenter(
+  cx: number,
+  cy: number,
+  radius: number,
+  phase: number,
+  layer: number,
+  writhe: number
+): { x: number; y: number } {
+  const drift = phase * (0.55 + layer * 0.08) + layer * 1.65;
+  const spread = radius * writhe * 0.09;
+  return {
+    x: cx + Math.cos(drift) * spread + Math.sin(drift * 2.2) * spread * 0.45,
+    y: cy + Math.sin(drift * 1.08) * spread + Math.cos(drift * 1.7) * spread * 0.4,
+  };
+}
+
+function drawPlasmaLayer(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   radius: number,
   rgb: [number, number, number],
-  alpha: number,
-  hotCore = false
+  alpha: number
 ): void {
-  const coreRgb = hotCore
-    ? mixRgb(rgb, [255, 118, 48], 0.42)
-    : rgb;
-  const gradient = ctx.createRadialGradient(
-    x,
-    y,
-    0,
-    x,
-    y,
-    radius
-  );
+  const core = mixRgb(rgb, [255, 96, 36], 0.22);
+  const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
 
-  gradient.addColorStop(0, rgba(coreRgb, alpha * (hotCore ? 0.95 : 0.72)));
-  gradient.addColorStop(0.28, rgba(rgb, alpha * 0.46));
-  gradient.addColorStop(0.62, rgba(mixRgb(rgb, [0, 0, 0], 0.35), alpha * 0.14));
+  gradient.addColorStop(0, rgba(core, alpha * 0.82));
+  gradient.addColorStop(0.35, rgba(rgb, alpha * 0.58));
+  gradient.addColorStop(0.72, rgba(mixRgb(rgb, [80, 8, 12], 0.35), alpha * 0.22));
   gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
 
   ctx.fillStyle = gradient;
@@ -235,70 +270,32 @@ function drawCore(
   const cy = height / 2;
   const base = Math.min(width, height);
   const heat = smoothstep(tempNorm);
-  const intensity = 0.18 + heat * 0.82;
-  const baseRadius = base * (0.2 + intensity * 0.22);
-  const agitation = Math.pow(intensity, 1.25) * (1.08 - heat * 0.42);
-  const phase = reducedMotion
-    ? 0
-    : timeMs * (0.0008 + agitation * 0.0042);
-  const pulse = 1 + Math.sin(phase * 4.8) * agitation * 0.07;
+  const radius = base * (0.24 + heat * 0.14);
+  const writhe = heat * (1 - heat * 0.62) * 0.9;
+  const phase = reducedMotion ? 0 : timeMs * (0.00055 + heat * 0.0011);
+  const breathe = 1 + Math.sin(phase * 2.4) * writhe * 0.025;
 
   ctx.save();
-  ctx.globalCompositeOperation = "screen";
+  traceWrithingPath(ctx, cx, cy, radius * breathe, phase, writhe);
+  ctx.clip();
 
-  const centerColor = orbCriticalColor(tempNorm, 0, 1);
-  drawBlob(
-    ctx,
-    cx + Math.sin(phase * 1.6) * baseRadius * agitation * 0.06,
-    cy + Math.cos(phase * 1.35) * baseRadius * agitation * 0.06,
-    baseRadius * (0.72 + agitation * 0.22) * pulse,
-    centerColor,
-    0.28 + intensity * 0.52,
-    heat > 0.62
-  );
+  for (let layer = 0; layer < LAYER_COUNT; layer++) {
+    const center = internalLayerCenter(cx, cy, radius, phase, layer, writhe);
+    const layerRadius = radius * (0.92 - layer * 0.06);
+    const rgb = layerColor(tempNorm, layer);
+    const alpha = 0.14 + heat * 0.1 - layer * 0.012;
 
-  for (let index = 0; index < ORB_COUNT; index++) {
-    const seed = index * 2.399963;
-    const orbitRadius =
-      baseRadius * (0.12 + agitation * (0.22 + fract(seed) * 0.26));
-    const orbitSpeed = 0.65 + index * 0.16 + intensity * 0.95;
-    const angle = phase * orbitSpeed + seed * Math.PI * 2;
-    const wobbleX =
-      Math.cos(angle * 2.6 + phase * 1.8) * baseRadius * agitation * 0.14;
-    const wobbleY =
-      Math.sin(angle * 2.1 + phase * 2.2) * baseRadius * agitation * 0.12;
-    const x =
-      cx +
-      Math.cos(angle) * orbitRadius +
-      Math.cos(angle * 1.7 + phase * 2.4) * baseRadius * agitation * 0.12 +
-      wobbleX;
-    const y =
-      cy +
-      Math.sin(angle * 1.11) * orbitRadius +
-      Math.sin(angle * 1.4 + phase * 1.9) * baseRadius * agitation * 0.1 +
-      wobbleY;
-    const sizeBias = 0.52 + fract(seed * 1.31) * 0.38;
-    const blobRadius =
-      baseRadius * sizeBias * (0.78 + intensity * 0.45) * pulse;
-    const rgb = orbCriticalColor(tempNorm, index + 1, ORB_COUNT);
-    const alpha = 0.18 + intensity * 0.44 + fract(seed) * 0.08;
-
-    drawBlob(ctx, x, y, blobRadius, rgb, alpha, heat > 0.78 && index % 3 === 0);
+    drawPlasmaLayer(ctx, center.x, center.y, layerRadius, rgb, alpha);
   }
 
-  if (heat > 0.78) {
-    const flash = 0.5 + Math.sin(phase * 4.2 + 1.3) * 0.5;
-    drawBlob(
-      ctx,
-      cx,
-      cy,
-      baseRadius * (0.3 + flash * 0.08),
-      PLASMA[6],
-      0.06 + flash * heat * 0.14,
-      false
-    );
-  }
+  ctx.restore();
 
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  traceWrithingPath(ctx, cx, cy, radius * breathe * 1.02, phase, writhe * 0.85);
+  ctx.strokeStyle = rgba(layerColor(tempNorm, 0), 0.06 + heat * 0.1);
+  ctx.lineWidth = 1.5 + heat * 2;
+  ctx.stroke();
   ctx.restore();
 }
 
