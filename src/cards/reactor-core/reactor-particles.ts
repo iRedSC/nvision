@@ -40,8 +40,8 @@ export interface ReactorParticle {
   orbitRyScale: number;
   baseOrbitSpeed: number;
   wobbleSpeed: number;
-  vx: number;
-  vy: number;
+  /** Signed offset from the nominal orbit path along the path normal. */
+  pathDrift: number;
   isOn: boolean;
   lastState?: string;
   numericNorm: number;
@@ -247,8 +247,7 @@ function createParticle(
     orbitRyScale: 0.62 + seedY * 0.32,
     baseOrbitSpeed: 0.00085 + seed * 0.0011,
     wobbleSpeed: 0.0016 + seedY * 0.0024,
-    vx: 0,
-    vy: 0,
+    pathDrift: 0,
     isOn: false,
     lastState: state,
     numericNorm: 0.35,
@@ -338,33 +337,8 @@ function orbitTangent(
   return { x: tx / len, y: ty / len };
 }
 
-/** Bias repulsion sideways along the orbit so orbs slide past instead of stacking. */
-function slideRepulsionDir(
-  pushDirX: number,
-  pushDirY: number,
-  tangentX: number,
-  tangentY: number
-): { x: number; y: number } {
-  const along = pushDirX * tangentX + pushDirY * tangentY;
-  let perpX = pushDirX - along * tangentX;
-  let perpY = pushDirY - along * tangentY;
-  const perpLen = Math.hypot(perpX, perpY);
-
-  if (perpLen < 0.01) {
-    perpX = -tangentY;
-    perpY = tangentX;
-  } else {
-    perpX /= perpLen;
-    perpY /= perpLen;
-  }
-
-  const blendX = along * 0.22 * tangentX + perpX * 2.1;
-  const blendY = along * 0.22 * tangentY + perpY * 2.1;
-  const blendLen = Math.hypot(blendX, blendY);
-  if (blendLen < 0.01) {
-    return { x: pushDirX, y: pushDirY };
-  }
-  return { x: blendX / blendLen, y: blendY / blendLen };
+function pathNormal(tangent: { x: number; y: number }): { x: number; y: number } {
+  return { x: -tangent.y, y: tangent.x };
 }
 
 export function placeParticle(
@@ -376,6 +350,7 @@ export function placeParticle(
   const target = orbitTarget(particle, width, height, timeMs);
   particle.x = target.x;
   particle.y = target.y;
+  particle.pathDrift = 0;
   particle.placed = true;
 }
 
@@ -723,33 +698,54 @@ function simulateParticles(
   const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
   const refRadius = scale * 0.012;
   const minRadius = scale * 0.003;
-  const spring = 0.0032 * motion;
-  const repulse = 0.022 * motion;
-  const damping = 0.88;
+  const driftSpring = 0.05 * motion;
+  const repulse = 0.024 * motion;
+  const maxDrift = scale * 0.09;
   const collisionRadii = particles.map((particle) =>
     orbCollisionRadius(particle, scale)
   );
 
   for (let i = 0; i < particles.length; i += 1) {
     const particle = particles[i];
+    particle.phase +=
+      particle.baseOrbitSpeed *
+      orbitSpeedMultiplier(particle, scale) *
+      delta;
+  }
+
+  const frames = particles.map((particle) => {
+    const target = orbitTarget(particle, width, height, timeMs);
+    const normal = pathNormal(orbitTangent(particle, width, height, timeMs));
+    return { target, normal };
+  });
+
+  for (let i = 0; i < particles.length; i += 1) {
+    const particle = particles[i];
+    const { target, normal } = frames[i];
     const particleRadius = collisionRadii[i];
     const mass = Math.max(particleRadius, minRadius) / refRadius;
-    const springK = spring * Math.min(1.35, Math.max(0.4, 1 / Math.sqrt(mass)));
-    const tangent = orbitTangent(particle, width, height, timeMs);
-    let crowdStress = 0;
+    const springK =
+      driftSpring * Math.min(1.35, Math.max(0.4, 1 / Math.sqrt(mass)));
 
-    const target = orbitTarget(particle, width, height, timeMs);
+    let driftDelta = -particle.pathDrift * springK * delta;
+    const worldX = target.x + normal.x * particle.pathDrift;
+    const worldY = target.y + normal.y * particle.pathDrift;
 
     for (let j = 0; j < particles.length; j += 1) {
       if (j === i) {
         continue;
       }
       const other = particles[j];
+      const otherFrame = frames[j];
       const otherRadius = collisionRadii[j];
       const touchDist = particleRadius + otherRadius;
       const pairDist = touchDist + scale * 0.014;
-      const dx = particle.x - other.x;
-      const dy = particle.y - other.y;
+      const otherX =
+        otherFrame.target.x + otherFrame.normal.x * other.pathDrift;
+      const otherY =
+        otherFrame.target.y + otherFrame.normal.y * other.pathDrift;
+      const dx = worldX - otherX;
+      const dy = worldY - otherY;
       const dist = Math.hypot(dx, dy);
       if (dist <= 0.5 || dist >= pairDist) {
         continue;
@@ -757,65 +753,38 @@ function simulateParticles(
 
       const proximity = (pairDist - dist) / (pairDist - touchDist * 0.65);
       const penetration = Math.max(0, touchDist - dist);
-      crowdStress = Math.max(
-        crowdStress,
-        proximity * 0.45,
-        penetration / touchDist
-      );
-
-      const massRatio = Math.max(otherRadius, minRadius) / Math.max(particleRadius, minRadius);
+      const massRatio =
+        Math.max(otherRadius, minRadius) / Math.max(particleRadius, minRadius);
       const push =
         (proximity ** 1.2 + (penetration / touchDist) * 2.5) *
         repulse *
         massRatio *
         delta;
+      const projected =
+        (dx / dist) * normal.x + (dy / dist) * normal.y;
 
-      const pushDirX = dx / dist;
-      const pushDirY = dy / dist;
-      const slide = slideRepulsionDir(
-        pushDirX,
-        pushDirY,
-        tangent.x,
-        tangent.y
-      );
-
-      particle.vx += slide.x * push;
-      particle.vy += slide.y * push;
+      driftDelta += projected * push;
 
       if (penetration > 0) {
-        const separate = (penetration / touchDist) * 0.35 * (1 / mass) * delta;
-        particle.x += slide.x * separate;
-        particle.y += slide.y * separate;
+        driftDelta +=
+          projected * (penetration / touchDist) * 0.35 * (1 / mass) * delta;
       }
     }
 
-    const springScale = 1 - Math.min(0.88, crowdStress * 0.92);
-    const orbitScale = 1 - Math.min(0.75, crowdStress * 0.8);
+    particle.pathDrift += driftDelta;
+    particle.pathDrift = Math.min(
+      maxDrift,
+      Math.max(-maxDrift, particle.pathDrift)
+    );
 
-    particle.phase +=
-      particle.baseOrbitSpeed *
-      orbitSpeedMultiplier(particle, scale) *
-      orbitScale *
-      delta;
-
-    particle.vx += (target.x - particle.x) * springK * springScale * delta;
-    particle.vy += (target.y - particle.y) * springK * springScale * delta;
-
-    const toCenterX = cx - particle.x;
-    const toCenterY = cy - particle.y;
-    const centerDist = Math.hypot(toCenterX, toCenterY);
-    const limit = Math.min(clampX, clampY) * 0.96;
-    if (centerDist > limit) {
-      particle.vx += (toCenterX / centerDist) * 0.006 * delta * motion;
-      particle.vy += (toCenterY / centerDist) * 0.006 * delta * motion;
-    }
-
-    particle.vx *= damping;
-    particle.vy *= damping;
-    particle.x += particle.vx * delta * motion * 16;
-    particle.y += particle.vy * delta * motion * 16;
-    particle.x = Math.min(cx + clampX, Math.max(cx - clampX, particle.x));
-    particle.y = Math.min(cy + clampY, Math.max(cy - clampY, particle.y));
+    let x = target.x + normal.x * particle.pathDrift;
+    let y = target.y + normal.y * particle.pathDrift;
+    x = Math.min(cx + clampX, Math.max(cx - clampX, x));
+    y = Math.min(cy + clampY, Math.max(cy - clampY, y));
+    particle.x = x;
+    particle.y = y;
+    particle.pathDrift =
+      (x - target.x) * normal.x + (y - target.y) * normal.y;
     particle.placed = true;
   }
 }
