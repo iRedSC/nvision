@@ -110,9 +110,10 @@ function cellBackground(
   }
 
   const color = resolveHeatColor(host, level, mode, config);
-  const mix =
-    config.dim_low_values === true ? level * level * 100 : level * 100;
-  const clamped = Math.min(100, Math.max(6, mix));
+  const mix = config.dim_low_values
+    ? level * level * 100
+    : 15 + level * 55;
+  const clamped = Math.min(100, Math.max(config.dim_low_values ? 6 : 10, mix));
   return `color-mix(in srgb, ${color} ${clamped}%, var(--card-background-color))`;
 }
 
@@ -553,20 +554,20 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       const pct = (level * 100).toFixed(1);
       return `${cellBackground(this, level, mode, config, true)} ${pct}%`;
     });
-    const gradient = `linear-gradient(to right, ${stops.join(", ")})`;
+    const gradient = `linear-gradient(to bottom, ${stops.join(", ")})`;
     const mid = (grid.min + grid.max) / 2;
 
     return html`
       <div class="legend-wrap" aria-hidden="true">
+        <div class="legend-labels">
+          <span>${formatLegendValue(grid.max, aggregate, unit)}</span>
+          <span>${formatLegendValue(mid, aggregate, unit)}</span>
+          <span>${formatLegendValue(grid.min, aggregate, unit)}</span>
+        </div>
         <div
           class="legend-bar"
           style=${styleMap({ background: gradient })}
         ></div>
-        <div class="legend-labels">
-          <span>${formatLegendValue(grid.min, aggregate, unit)}</span>
-          <span>${formatLegendValue(mid, aggregate, unit)}</span>
-          <span>${formatLegendValue(grid.max, aggregate, unit)}</span>
-        </div>
       </div>
     `;
   }
@@ -956,9 +957,9 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     .cells-legend-row {
       display: flex;
       flex: 1;
-      flex-direction: column;
+      flex-direction: row;
       align-items: stretch;
-      gap: clamp(4px, 1.4cqh, 8px);
+      gap: clamp(6px, 1.5cqw, 10px);
       min-height: 0;
       min-width: 0;
     }
@@ -1131,33 +1132,32 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     .legend-wrap {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       align-items: stretch;
-      gap: 4px;
+      gap: 6px;
       flex-shrink: 0;
       align-self: stretch;
-      width: 100%;
-      height: auto;
+      width: auto;
+      height: 100%;
       min-height: 0;
     }
 
     .legend-labels {
       display: flex;
-      flex-direction: row;
+      flex-direction: column;
       justify-content: space-between;
-      gap: 6px;
       font-size: clamp(8px, 2.4cqw, 10px);
       color: var(--secondary-text-color);
-      text-align: center;
+      text-align: right;
       line-height: 1.2;
-      padding: 0;
+      padding: 2px 0;
+      height: 100%;
       min-width: 0;
     }
 
     .legend-bar {
-      width: 100%;
-      height: clamp(6px, 1.8cqh, 9px);
-      min-height: 4px;
+      width: clamp(8px, 2cqw, 12px);
+      height: 100%;
       border-radius: 4px;
       border: 1px solid var(--divider-color);
     }
