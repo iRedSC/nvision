@@ -9,10 +9,13 @@ import {
 } from "../../utils/interaction-schema";
 import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
 import {
+  DEFAULT_INFO_SELECTION,
   DEFAULT_MAX,
   DEFAULT_MAX_PARTICLES,
   DEFAULT_MIN,
   DEFAULT_MODE,
+  DEFAULT_SHOW_INFO,
+  DEFAULT_SHOW_INFO_CHANGE,
   REACTOR_CORE_CARD_EDITOR_NAME,
   REACTOR_ENTITY_DOMAINS,
 } from "./const";
@@ -36,6 +39,30 @@ const BASE_SCHEMA: HaFormSchema[] = [
     name: "max_particles",
     default: DEFAULT_MAX_PARTICLES,
     selector: { number: { min: 4, max: 64, mode: "box" } },
+  },
+  {
+    name: "info_selection",
+    required: true,
+    default: DEFAULT_INFO_SELECTION,
+    selector: {
+      select: {
+        options: [
+          { value: "on_update", label: "On update" },
+          { value: "random_interval", label: "Random every 10s" },
+          { value: "nearest_cursor", label: "Nearest 4 to cursor/tap" },
+        ],
+      },
+    },
+  },
+  {
+    name: "show_info",
+    default: DEFAULT_SHOW_INFO,
+    selector: { boolean: {} },
+  },
+  {
+    name: "show_info_change",
+    default: DEFAULT_SHOW_INFO_CHANGE,
+    selector: { boolean: {} },
   },
   {
     type: "grid",
@@ -115,6 +142,18 @@ export class NvisionReactorCoreCardEditor
 
     if (schema.name === "max_particles") {
       return "Maximum particles";
+    }
+
+    if (schema.name === "info_selection") {
+      return "Info card selection";
+    }
+
+    if (schema.name === "show_info") {
+      return "Show info cards";
+    }
+
+    if (schema.name === "show_info_change") {
+      return "Show value change (10W → 50W)";
     }
 
     if (schema.name === "min") {

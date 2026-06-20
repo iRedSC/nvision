@@ -19,10 +19,14 @@ import {
 import { formatStateWithUnit } from "../../utils/entity-state";
 import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
 import {
+  DEFAULT_INFO_SELECTION,
   DEFAULT_MAX,
   DEFAULT_MAX_PARTICLES,
   DEFAULT_MIN,
   DEFAULT_MODE,
+  DEFAULT_SHOW_INFO,
+  DEFAULT_SHOW_INFO_CHANGE,
+  INFO_RANDOM_INTERVAL_MS,
   REACTOR_CORE_CARD_EDITOR_NAME,
   REACTOR_CORE_CARD_NAME,
   REACTOR_ENTITY_DOMAINS,
@@ -105,6 +109,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   @state() private _slotIds: string[] = Array(INFO_SLOT_COUNT).fill("");
 
+  @state() private _infoChangeFrom: Record<string, string> = {};
+
   @query(".stage") private _stage?: HTMLElement;
 
   @query("canvas") private _canvas?: HTMLCanvasElement;
@@ -118,6 +124,9 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
   private _entityKey = "";
   private _resizeObserver?: ResizeObserver;
   private _slotAge = Array(INFO_SLOT_COUNT).fill(0);
+  private _pointerX?: number;
+  private _pointerY?: number;
+  private _lastRandomPickMs = 0;
 
   private _actions = new ActionHandlers(
     () => this,
@@ -131,11 +140,16 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       max_particles: DEFAULT_MAX_PARTICLES,
       min: DEFAULT_MIN,
       max: DEFAULT_MAX,
+      info_selection: DEFAULT_INFO_SELECTION,
+      show_info: DEFAULT_SHOW_INFO,
+      show_info_change: DEFAULT_SHOW_INFO_CHANGE,
       ...moreInfoInteractions(),
       ...config,
     };
     this._entityKey = "";
     this._pulses = [];
+    this._lastRandomPickMs = 0;
+    this._infoChangeFrom = {};
   }
 
   public getCardSize(): number {
@@ -198,6 +212,19 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       this._entityKey = key + configKey;
     }
 
+    const previousFormatted = new Map<string, string>();
+    if (this._showInfoChange()) {
+      for (const particle of this._particles) {
+        if (particle.lastState === undefined) {
+          continue;
+        }
+        previousFormatted.set(
+          particle.entityId,
+          this._formatEntityState(particle.entityId, particle.lastState)
+        );
+      }
+    }
+
     const { particles, changedIds } = syncParticles(
       this._particles,
       this.hass,
@@ -209,9 +236,95 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     );
     this._particles = particles;
 
-    for (const entityId of changedIds) {
-      this._assignToOldestSlot(entityId);
+    const selection =
+      this._config.info_selection ?? DEFAULT_INFO_SELECTION;
+
+    if (selection === "on_update") {
+      for (const entityId of changedIds) {
+        this._assignToOldestSlot(entityId);
+      }
+    } else if (selection === "random_interval" && this._lastRandomPickMs === 0) {
+      this._pickRandomSlots(timeMs);
     }
+
+    if (this._showInfoChange() && changedIds.length) {
+      const nextChanges = { ...this._infoChangeFrom };
+      for (const entityId of changedIds) {
+        const previous = previousFormatted.get(entityId);
+        if (previous) {
+          nextChanges[entityId] = previous;
+        }
+      }
+      this._infoChangeFrom = nextChanges;
+    }
+
+    this._pruneInfoChangeFrom();
+  }
+
+  private _infoSelection(): ReactorCoreCardConfig["info_selection"] {
+    return this._config?.info_selection ?? DEFAULT_INFO_SELECTION;
+  }
+
+  private _showInfo(): boolean {
+    return this._config?.show_info ?? DEFAULT_SHOW_INFO;
+  }
+
+  private _showInfoChange(): boolean {
+    return this._config?.show_info_change ?? DEFAULT_SHOW_INFO_CHANGE;
+  }
+
+  private _formatEntityState(entityId: string, state: string): string {
+    const stateObj = this.hass?.states[entityId];
+    if (!stateObj) {
+      return state;
+    }
+
+    return formatStateWithUnit({ ...stateObj, state });
+  }
+
+  private _slotSecondary(entityId: string): string {
+    const stateObj = this.hass?.states[entityId];
+    const current = formatStateWithUnit(stateObj);
+
+    if (!this._showInfoChange()) {
+      return current;
+    }
+
+    const previous = this._infoChangeFrom[entityId];
+    if (!previous || previous === current) {
+      return current;
+    }
+
+    return `${previous} → ${current}`;
+  }
+
+  private _pruneInfoChangeFrom(): void {
+    const visible = new Set(this._slotIds.filter(Boolean));
+    const next: Record<string, string> = {};
+
+    for (const [entityId, value] of Object.entries(this._infoChangeFrom)) {
+      if (visible.has(entityId)) {
+        next[entityId] = value;
+      }
+    }
+
+    if (Object.keys(next).length !== Object.keys(this._infoChangeFrom).length) {
+      this._infoChangeFrom = next;
+    }
+  }
+
+  private _setSlotIds(entityIds: string[]): void {
+    const slots = entityIds.slice(0, INFO_SLOT_COUNT);
+    while (slots.length < INFO_SLOT_COUNT) {
+      slots.push("");
+    }
+
+    if (slots.join("|") === this._slotIds.join("|")) {
+      return;
+    }
+
+    this._slotIds = slots;
+    this._pruneInfoChangeFrom();
   }
 
   private _assignToOldestSlot(entityId: string): void {
@@ -229,6 +342,80 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     ages[oldestIndex] = performance.now();
     this._slotIds = slots;
     this._slotAge = ages;
+    this._pruneInfoChangeFrom();
+  }
+
+  private _pickRandomSlots(timeMs = performance.now()): void {
+    const ids = this._particles
+      .filter((particle) => particle.placed)
+      .map((particle) => particle.entityId);
+
+    if (!ids.length) {
+      return;
+    }
+
+    const shuffled = [...ids];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [
+        shuffled[swapIndex],
+        shuffled[index],
+      ];
+    }
+
+    this._setSlotIds(shuffled);
+    this._slotAge = Array(INFO_SLOT_COUNT).fill(timeMs);
+    this._lastRandomPickMs = timeMs;
+  }
+
+  private _updateNearestSlots(targetX: number, targetY: number): void {
+    const nearest = this._particles
+      .filter((particle) => particle.placed)
+      .map((particle) => ({
+        entityId: particle.entityId,
+        distance: Math.hypot(particle.x - targetX, particle.y - targetY),
+      }))
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, INFO_SLOT_COUNT)
+      .map((entry) => entry.entityId);
+
+    this._setSlotIds(nearest);
+  }
+
+  private _refreshInfoSlots(
+    width: number,
+    height: number,
+    timeMs: number
+  ): void {
+    const selection = this._infoSelection();
+
+    if (selection === "random_interval") {
+      if (
+        this._lastRandomPickMs === 0 ||
+        timeMs - this._lastRandomPickMs >= INFO_RANDOM_INTERVAL_MS
+      ) {
+        this._pickRandomSlots(timeMs);
+      }
+      return;
+    }
+
+    if (selection === "nearest_cursor") {
+      this._updateNearestSlots(
+        this._pointerX ?? width / 2,
+        this._pointerY ?? height / 2
+      );
+    }
+  }
+
+  private _trackPointer(event: PointerEvent): void {
+    const stage = this._stage;
+    if (!stage) {
+      return;
+    }
+
+    const rect = stage.getBoundingClientRect();
+    this._pointerX = event.clientX - rect.left;
+    this._pointerY = event.clientY - rect.top;
   }
 
   private _infoAnchors(): { x: number; y: number }[] {
@@ -250,6 +437,10 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
   }
 
   private _buildConnections(): ReactorConnection[] {
+    if (!this._showInfo()) {
+      return [];
+    }
+
     const anchors = this._infoAnchors();
     const connections: ReactorConnection[] = [];
 
@@ -379,6 +570,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       reducedMotion
     );
     updatePulses(this._pulses, deltaMs);
+    this._refreshInfoSlots(width, height, timeMs);
     drawReactor(
       ctx,
       this._particles,
@@ -396,6 +588,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     const title = this._config.name || "Reactor Core";
+    const showInfo = this._showInfo();
 
     return html`
       <ha-card aria-label=${title}>
@@ -408,40 +601,48 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
             @click=${this._actions.bind().click}
             @dblclick=${this._actions.bind().dblclick}
             @keydown=${this._actions.bind().keydown}
-            @pointerdown=${this._actions.bind().pointerdown}
+            @pointerdown=${(event: PointerEvent) => {
+              this._trackPointer(event);
+              this._actions.bind().pointerdown(event);
+            }}
+            @pointermove=${this._trackPointer}
             @pointerup=${this._actions.bind().pointerup}
             @pointerleave=${this._actions.bind().pointerleave}
             @pointercancel=${this._actions.bind().pointercancel}
           >
-            <div class="info-bar">
-              ${this._slotIds.map((entityId, index) => {
-                const stateObj = entityId
-                  ? this.hass.states[entityId]
-                  : undefined;
+            ${showInfo
+              ? html`
+                  <div class="info-bar">
+                    ${this._slotIds.map((entityId, index) => {
+                      const stateObj = entityId
+                        ? this.hass.states[entityId]
+                        : undefined;
 
-                return html`
-                  <div
-                    class="info-slot"
-                    data-slot=${index}
-                    @click=${(event: Event) => event.stopPropagation()}
-                  >
-                    ${stateObj
-                      ? html`
-                          <ha-state-icon
-                            .hass=${this.hass}
-                            .stateObj=${stateObj}
-                          ></ha-state-icon>
-                          <ha-tile-info
-                            .primary=${stateObj.attributes.friendly_name ??
-                            entityId}
-                            .secondary=${formatStateWithUnit(stateObj)}
-                          ></ha-tile-info>
-                        `
-                      : html`<span class="info-empty">—</span>`}
+                      return html`
+                        <div
+                          class="info-slot"
+                          data-slot=${index}
+                          @click=${(event: Event) => event.stopPropagation()}
+                        >
+                          ${stateObj
+                            ? html`
+                                <ha-state-icon
+                                  .hass=${this.hass}
+                                  .stateObj=${stateObj}
+                                ></ha-state-icon>
+                                <ha-tile-info
+                                  .primary=${stateObj.attributes
+                                    .friendly_name ?? entityId}
+                                  .secondary=${this._slotSecondary(entityId)}
+                                ></ha-tile-info>
+                              `
+                            : html`<span class="info-empty">—</span>`}
+                        </div>
+                      `;
+                    })}
                   </div>
-                `;
-              })}
-            </div>
+                `
+              : nothing}
           </div>
         </div>
       </ha-card>
