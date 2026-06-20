@@ -13,14 +13,14 @@ export interface EntityHistoryState {
 }
 
 interface StatisticValue {
-  start: number;
-  end: number;
-  change?: number | null;
-  max?: number | null;
-  mean?: number | null;
-  min?: number | null;
-  sum?: number | null;
-  state?: number | null;
+  start: number | string;
+  end: number | string;
+  change?: number | string | null;
+  max?: number | string | null;
+  mean?: number | string | null;
+  min?: number | string | null;
+  sum?: number | string | null;
+  state?: number | string | null;
 }
 
 type StatisticsResponse = Record<string, StatisticValue[]>;
@@ -214,25 +214,44 @@ function statisticField(
   value: StatisticValue,
   aggregate: AggregateType
 ): number | undefined {
+  const firstNumber = (
+    ...values: Array<number | string | null | undefined>
+  ): number | undefined => {
+    for (const item of values) {
+      if (item === undefined || item === null) {
+        continue;
+      }
+      const numeric = Number(item);
+      if (Number.isFinite(numeric)) {
+        return numeric;
+      }
+    }
+    return undefined;
+  };
+
   switch (aggregate) {
     case "mean":
-      return value.mean ?? value.state ?? undefined;
+      return firstNumber(value.mean, value.state);
     case "sum":
-      return value.sum ?? value.change ?? undefined;
+      return firstNumber(value.sum, value.change, value.state);
     case "max":
-      return value.max ?? value.sum ?? undefined;
+      return firstNumber(value.max, value.state, value.sum);
     case "min":
-      return value.min ?? undefined;
+      return firstNumber(value.min, value.state);
     case "last":
-      return value.state ?? value.mean ?? undefined;
+      return firstNumber(value.state, value.mean);
     case "count":
-      return value.change ?? undefined;
+      return firstNumber(value.change);
     default:
-      return value.mean ?? value.state ?? undefined;
+      return firstNumber(value.mean, value.state);
   }
 }
 
-function toEpochMs(timestamp: number): number {
+function toEpochMs(timestamp: number | string): number | undefined {
+  if (typeof timestamp === "string") {
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
   return timestamp < 1e11 ? timestamp * 1000 : timestamp;
 }
 
@@ -247,7 +266,11 @@ function statisticsToPoints(
     if (numeric === undefined || numeric === null || !Number.isFinite(numeric)) {
       continue;
     }
-    points.push({ time: toEpochMs(value.start), value: numeric });
+    const time = toEpochMs(value.start);
+    if (time === undefined) {
+      continue;
+    }
+    points.push({ time, value: numeric });
   }
 
   return points;
@@ -344,11 +367,11 @@ export async function fetchStatisticsPoints(
   const callWS = requireCallWS(hass);
   const types =
     aggregate === "sum"
-      ? ["sum", "change"]
+      ? ["sum", "change", "state"]
       : aggregate === "max"
-        ? ["max", "sum"]
+        ? ["max", "state", "sum"]
         : aggregate === "min"
-          ? ["min"]
+          ? ["min", "state"]
           : ["mean", "state"];
 
   const response = await callWS<StatisticsResponse>({
