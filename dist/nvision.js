@@ -1766,7 +1766,7 @@ var t,e,i,n,s,a,r,o,l,c,h,d,u,m,g,p,f,_,v,y,b,x,w,$,M,k,C,S,A,z,E,P,T,L,I,O,R,q,
 
     .cell {
       border: none;
-      border-radius: 3px;
+      border-radius: 18%;
       aspect-ratio: 1;
       width: 100%;
       min-width: 0;

@@ -1029,7 +1029,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     .cell {
       border: none;
-      border-radius: 3px;
+      border-radius: 18%;
       aspect-ratio: 1;
       width: 100%;
       min-width: 0;
