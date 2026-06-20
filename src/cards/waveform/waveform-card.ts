@@ -404,7 +404,9 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       const radius =
         baseRadius *
         params.radiusMul *
-        (0.82 + animIntensity * 0.28 + highBoost * 0.2);
+        (0.68 +
+          animIntensity * 0.38 +
+          highBoost * highBoost * 0.85);
       const alpha =
         (0.3 + animIntensity * 0.52 + highBoost * highBoost * 0.6) *
         params.alphaMul *
