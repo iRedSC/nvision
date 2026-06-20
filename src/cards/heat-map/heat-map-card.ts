@@ -146,6 +146,56 @@ function firstWeekday(_hass: HomeAssistant): number {
   return 1;
 }
 
+let axisMeasureContext: CanvasRenderingContext2D | null = null;
+
+function measureAxisLabel(text: string, font: string): number {
+  axisMeasureContext ??= document.createElement("canvas").getContext("2d");
+  if (!axisMeasureContext) {
+    return text.length * 6;
+  }
+  axisMeasureContext.font = font;
+  return axisMeasureContext.measureText(text).width;
+}
+
+function computeVisibleXLabels(
+  labels: string[],
+  slotWidthPx: number,
+  font: string,
+  gap = 6
+): boolean[] {
+  if (slotWidthPx <= 0 || !labels.length) {
+    return labels.map(() => true);
+  }
+
+  const visible = labels.map(() => false);
+  let lastRight = -Infinity;
+
+  for (let index = 0; index < labels.length; index++) {
+    const text = labels[index];
+    if (!text) {
+      continue;
+    }
+
+    const width = measureAxisLabel(text, font);
+    const center = (index + 0.5) * slotWidthPx;
+    const left = center - width / 2;
+
+    if (left >= lastRight + gap) {
+      visible[index] = true;
+      lastRight = center + width / 2;
+    }
+  }
+
+  return visible;
+}
+
+function sameVisibility(a?: boolean[], b?: boolean[]): boolean {
+  if (!a || !b || a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+}
+
 @customElement(HEAT_MAP_CARD_NAME)
 export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -197,9 +247,17 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
   @state() private _popover?: ActivePopover;
 
+  @state() private _xLabelVisible?: boolean[];
+
   private _fetchVersion = 0;
 
   private _loadKey?: string;
+
+  private _measureFrame = 0;
+
+  private _resizeObserver?: ResizeObserver;
+
+  private _observedWrap?: Element;
 
   private _computeLoadKey(): string {
     const config = this._config;
@@ -247,18 +305,90 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     };
   }
 
+  connectedCallback(): void {
+    super.connectedCallback();
+    this._resizeObserver = new ResizeObserver(() =>
+      this._scheduleXLabelMeasure()
+    );
+  }
+
+  disconnectedCallback(): void {
+    this._resizeObserver?.disconnect();
+    cancelAnimationFrame(this._measureFrame);
+    super.disconnectedCallback();
+  }
+
   protected updated(changed: Map<string, unknown>): void {
-    if (!changed.has("_config") && !changed.has("hass")) {
+    if (changed.has("_config") || changed.has("hass")) {
+      const loadKey = this._computeLoadKey();
+      if (loadKey && this.hass && loadKey !== this._loadKey) {
+        this._loadKey = loadKey;
+        void this._loadData();
+      }
+    }
+
+    if (changed.has("_grid")) {
+      this._xLabelVisible = undefined;
+    }
+
+    if (this._grid && this._config?.show_axis_labels !== false) {
+      this._scheduleXLabelMeasure();
+    }
+  }
+
+  private _scheduleXLabelMeasure(): void {
+    cancelAnimationFrame(this._measureFrame);
+    this._measureFrame = requestAnimationFrame(() =>
+      this._updateXLabelVisibility()
+    );
+  }
+
+  private _observeGridWrap(wrap: Element): void {
+    if (!this._resizeObserver || wrap === this._observedWrap) {
       return;
     }
 
-    const loadKey = this._computeLoadKey();
-    if (!loadKey || !this.hass || loadKey === this._loadKey) {
+    if (this._observedWrap) {
+      this._resizeObserver.unobserve(this._observedWrap);
+    }
+
+    this._observedWrap = wrap;
+    this._resizeObserver.observe(wrap);
+  }
+
+  private _updateXLabelVisibility(): void {
+    const grid = this._grid;
+    const root = this.shadowRoot;
+    if (!grid || !root || this._config?.show_axis_labels === false) {
       return;
     }
 
-    this._loadKey = loadKey;
-    void this._loadData();
+    const wrap = root.querySelector(".grid-wrap");
+    const gridEl = root.querySelector(".grid");
+    const sampleCell = root.querySelector(".cell");
+    if (!wrap || !gridEl || !sampleCell) {
+      return;
+    }
+
+    this._observeGridWrap(wrap);
+
+    const cells = root.querySelectorAll(".cell");
+    let slotWidth = sampleCell.getBoundingClientRect().width;
+    if (cells.length > 1) {
+      const first = cells[0].getBoundingClientRect();
+      const second = cells[1].getBoundingClientRect();
+      slotWidth = second.left - first.left;
+    }
+
+    const axisSample = root.querySelector(".axis.x");
+    const font = axisSample
+      ? getComputedStyle(axisSample).font
+      : "500 10px Roboto, sans-serif";
+
+    const visible = computeVisibleXLabels(grid.xLabels, slotWidth, font);
+    if (!sameVisibility(visible, this._xLabelVisible)) {
+      this._xLabelVisible = visible;
+    }
   }
 
   private async _loadData(): Promise<void> {
@@ -412,6 +542,8 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     const aggregate = defaultAggregate(config.entity);
     const colOffset = showLabels ? 2 : 1;
     const rowOffset = showLabels ? 2 : 1;
+    const xVisible =
+      this._xLabelVisible ?? grid.xLabels.map(() => true);
 
     return html`
       <div class="heatmap-body">
@@ -438,7 +570,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
                         gridRow: "1",
                       })}
                     >
-                      ${label}
+                      ${xVisible[x] ? label : nothing}
                     </div>
                   `
                 )
