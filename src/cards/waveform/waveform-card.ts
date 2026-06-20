@@ -31,7 +31,6 @@ import {
   baseDotRadius,
   buildDots,
   computeDotDrawParams,
-  computeMotionActivity,
   contentFade,
   edgeFade,
   resolvePresets,
@@ -354,17 +353,11 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     this._syncIntensity();
     const rawIntensity = this._tickIntensity(delta);
     const animIntensity = Math.max(0.12, rawIntensity);
-    const { shakeSpeed } = this._shakeThresholds();
+    const { shakeAt, shakeSpeed } = this._shakeThresholds();
     const presets = this._presets();
-    const motionActivity = computeMotionActivity(
-      presets.motion,
-      rawIntensity,
-      presets.phaseSpeed,
-      shakeSpeed
-    );
     const frenzy =
-      motionActivity > DEFAULT_SHAKE_AT
-        ? 1 + (motionActivity - DEFAULT_SHAKE_AT) * 2.2
+      rawIntensity > shakeAt
+        ? 1 + (rawIntensity - shakeAt) * 2.2
         : 1;
     this._phase +=
       delta *
@@ -372,7 +365,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       presets.phaseSpeed *
       frenzy *
       shakeSpeed;
-    this._applyShake(motionActivity);
+    this._applyShake(rawIntensity);
 
     const waveColor = resolveWaveColor(this._config?.color, this);
     const scale = Math.min(width, height);

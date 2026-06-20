@@ -67,13 +67,21 @@ const SIZE_PRESETS: Record<
   compact: { dotScale: 0.88, span: 0.94, phaseSpeed: 0.92 },
   balanced: { dotScale: 1, span: 0.98, phaseSpeed: 1 },
   expansive: { dotScale: 1.08, span: 1, phaseSpeed: 1.08 },
+  dense: { dotScale: 0.94, span: 1, phaseSpeed: 1.1 },
+  packed: { dotScale: 0.86, span: 1, phaseSpeed: 1.14 },
 };
 
 const LAYOUT_DOT_COUNTS: Record<WaveformLayout, Record<WaveformSize, number>> =
   {
-    line: { compact: 16, balanced: 24, expansive: 32 },
-    ring: { compact: 18, balanced: 24, expansive: 32 },
-    field: { compact: 16, balanced: 25, expansive: 36 },
+    line: { compact: 16, balanced: 24, expansive: 32, dense: 40, packed: 48 },
+    ring: { compact: 18, balanced: 24, expansive: 32, dense: 40, packed: 48 },
+    field: {
+      compact: 16,
+      balanced: 25,
+      expansive: 36,
+      dense: 49,
+      packed: 64,
+    },
   };
 
 function smoothstep(value: number): number {
@@ -171,6 +179,12 @@ function resolveSize(config: WaveformCardConfig): WaveformSize {
     if (count <= 18) {
       return "compact";
     }
+    if (count >= 48) {
+      return "packed";
+    }
+    if (count >= 40) {
+      return "dense";
+    }
     if (count >= 30) {
       return "expansive";
     }
@@ -217,35 +231,6 @@ export function buildDots(count: number): ScopeDot[] {
       sign: seed > 0.5 ? 1 : -1,
     };
   });
-}
-
-/** 0–1 activity level used to gate card shake against actual dot motion */
-export function computeMotionActivity(
-  motion: WaveformMotion,
-  intensity: number,
-  phaseSpeed: number,
-  shakeSpeed: number
-): number {
-  const t = Math.max(0.08, intensity);
-  const spread = smoothstep(t);
-  const rate = (0.014 + t * t * 0.1) * phaseSpeed * shakeSpeed;
-
-  switch (motion) {
-    case "jet": {
-      const stream = 0.14 + spread * 0.86;
-      const amp = 0.12 + spread * 0.78;
-      return Math.min(
-        1,
-        stream * 0.42 + amp * 0.48 + rate * 1.4 + spread * spread * 0.35
-      );
-    }
-    case "spawn": {
-      const spawnRate = (0.06 + spread * spread * 0.28) * shakeSpeed;
-      return Math.min(1, spread * spawnRate * 4.5 + rate * 0.75);
-    }
-    default:
-      return Math.min(1, spread * spread * 1.05 * shakeSpeed + rate * 0.75);
-  }
 }
 
 function lineBaseY(height: number): number {

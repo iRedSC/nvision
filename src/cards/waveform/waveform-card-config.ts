@@ -2,7 +2,12 @@ import type { LovelaceCardConfig } from "../../types";
 import type { ConfigColor } from "../../utils/colors";
 
 export type WaveformLayout = "line" | "ring" | "field";
-export type WaveformSize = "compact" | "balanced" | "expansive";
+export type WaveformSize =
+  | "compact"
+  | "balanced"
+  | "expansive"
+  | "dense"
+  | "packed";
 export type WaveformMotion = "spawn" | "jet" | "surge";
 
 /** @deprecated Use layout preset instead */

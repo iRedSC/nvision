@@ -9,8 +9,8 @@ export const WAVEFORM_CARD_EDITOR_NAME = "nvision-waveform-card-editor";
 
 export const DEFAULT_MIN = 0;
 export const DEFAULT_MAX = 100;
-export const DEFAULT_SHAKE_AT = 0.72;
-export const DEFAULT_SHAKE_PEAK = 0.78;
+export const DEFAULT_SHAKE_AT = 0.6;
+export const DEFAULT_SHAKE_PEAK = 0.28;
 export const DEFAULT_SHAKE_SPEED = 0.45;
 
 export const DEFAULT_LAYOUT: WaveformLayout = "line";
@@ -44,6 +44,8 @@ export const SIZE_OPTIONS = [
   { value: "compact", label: "Compact" },
   { value: "balanced", label: "Balanced" },
   { value: "expansive", label: "Expansive" },
+  { value: "dense", label: "Dense" },
+  { value: "packed", label: "Packed" },
 ] as const;
 
 export const MOTION_OPTIONS = [
