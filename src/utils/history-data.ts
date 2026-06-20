@@ -88,12 +88,41 @@ export function isCounterLikeEntity(
   return stateClass === "total_increasing" || stateClass === "total";
 }
 
+export function isHistoryStatsEntity(
+  attributes: Record<string, unknown> | undefined
+): boolean {
+  return (
+    typeof attributes?.start === "string" &&
+    typeof attributes?.end === "string" &&
+    attributes?.value !== undefined
+  );
+}
+
+export function isDailyTallyEntity(
+  entityId: string | undefined,
+  attributes: Record<string, unknown> | undefined
+): boolean {
+  if (isHistoryStatsEntity(attributes)) {
+    return true;
+  }
+  if (attributes?.last_reset) {
+    return true;
+  }
+  if (entityId && /_today$/i.test(entityId)) {
+    return true;
+  }
+  return false;
+}
+
 export function defaultAggregate(
   entityId: string | undefined,
   attributes?: Record<string, unknown>
 ): AggregateType {
   if (isBinaryEntity(entityId)) {
     return "count";
+  }
+  if (isDailyTallyEntity(entityId, attributes)) {
+    return "max";
   }
   if (isCounterLikeEntity(attributes)) {
     return "last";
@@ -137,6 +166,50 @@ function historyToPoints(
   return points;
 }
 
+function dateKeyInZone(timeMs: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(timeMs));
+}
+
+/** One point per local day: highest reading before the next daily reset. */
+export function collapseToDailyMax(
+  points: HistoryPoint[],
+  timeZone: string
+): HistoryPoint[] {
+  const byDay = new Map<string, HistoryPoint>();
+
+  for (const point of points) {
+    const key = dateKeyInZone(point.time, timeZone);
+    const existing = byDay.get(key);
+    if (
+      !existing ||
+      point.value > existing.value ||
+      (point.value === existing.value && point.time > existing.time)
+    ) {
+      byDay.set(key, point);
+    }
+  }
+
+  return Array.from(byDay.values()).sort((a, b) => a.time - b.time);
+}
+
+function statsLookUsable(
+  points: HistoryPoint[],
+  aggregate: AggregateType
+): boolean {
+  if (!points.length) {
+    return false;
+  }
+  if (aggregate !== "max" && aggregate !== "sum") {
+    return true;
+  }
+  return points.some((point) => point.value > 0);
+}
+
 function statisticField(
   value: StatisticValue,
   aggregate: AggregateType
@@ -147,7 +220,7 @@ function statisticField(
     case "sum":
       return value.sum ?? value.change ?? undefined;
     case "max":
-      return value.max ?? value.state ?? undefined;
+      return value.max ?? value.sum ?? undefined;
     case "min":
       return value.min ?? undefined;
     case "last":
@@ -273,7 +346,7 @@ export async function fetchStatisticsPoints(
     aggregate === "sum"
       ? ["sum", "change"]
       : aggregate === "max"
-        ? ["max"]
+        ? ["max", "sum"]
         : aggregate === "min"
           ? ["min"]
           : ["mean", "state"];
@@ -315,7 +388,7 @@ export async function loadHistoryPoints(
         aggregate,
         period
       );
-      if (stats.length > 0) {
+      if (statsLookUsable(stats, aggregate)) {
         return stats;
       }
     } catch {
@@ -323,7 +396,7 @@ export async function loadHistoryPoints(
     }
   }
 
-  if (periodHours >= 24 && !prefersRawHistory(aggregate)) {
+  if (periodHours >= 24 && aggregate === "mean") {
     try {
       const period = periodHours > 24 * 14 ? "day" : "hour";
       const stats = await fetchStatisticsPoints(
