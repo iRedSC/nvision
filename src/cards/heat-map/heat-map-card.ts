@@ -22,6 +22,7 @@ import {
   normalizeLevel,
   PERIOD_HOURS,
   resolveAxes,
+  resolveBucketAggregate,
   type HeatMapGrid,
 } from "../../utils/heat-map-buckets";
 import {
@@ -271,6 +272,25 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
   private _observedWrap?: Element;
 
+  private _entityAttributes(): Record<string, unknown> | undefined {
+    const entity = this._config?.entity;
+    if (!entity || !this.hass) {
+      return undefined;
+    }
+    return this.hass.states[entity]?.attributes as Record<string, unknown>;
+  }
+
+  private _resolveAggregate(axes: ReturnType<typeof resolveAxes>): AggregateType {
+    const entity = this._config?.entity;
+    const attributes = this._entityAttributes();
+    return resolveBucketAggregate(
+      axes.x,
+      axes.y,
+      defaultAggregate(entity, attributes),
+      attributes
+    );
+  }
+
   private _computeLoadKey(): string {
     const config = this._config;
     if (!config?.entity) {
@@ -278,11 +298,18 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     }
 
     const axes = resolveAxes(config.preset);
+    const attributes = this._entityAttributes();
 
     return JSON.stringify({
       entity: config.entity,
       preset: config.preset,
-      aggregate: defaultAggregate(config.entity),
+      stateClass: attributes?.state_class,
+      aggregate: resolveBucketAggregate(
+        axes.x,
+        axes.y,
+        defaultAggregate(config.entity, attributes),
+        attributes
+      ),
       axes,
     });
   }
@@ -430,7 +457,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     try {
       const axes = resolveAxes(config.preset);
-      const aggregate = defaultAggregate(entity);
+      const aggregate = this._resolveAggregate(axes);
       const points = await loadHistoryPoints(
         hass,
         entity,
@@ -495,7 +522,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       ? this.hass?.states[config.entity]
       : undefined;
     const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
-    const aggregate = defaultAggregate(config.entity);
+    const aggregate = this._resolveAggregate(resolveAxes(config.preset));
 
     this._popover = {
       anchorX: cellRect.left - wrapRect.left + cellRect.width / 2,
@@ -521,7 +548,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       ? this.hass?.states[config.entity]
       : undefined;
     const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
-    const aggregate = defaultAggregate(config.entity);
+    const aggregate = this._resolveAggregate(resolveAxes(config.preset));
     const gradient = heatMapGradientCss(
       this,
       mode,
@@ -667,7 +694,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     const showLegend = config.show_legend !== false;
     const stateObj = config.entity ? this.hass?.states[config.entity] : undefined;
     const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
-    const aggregate = defaultAggregate(config.entity);
+    const aggregate = this._resolveAggregate(resolveAxes(config.preset));
     const colOffset = showLabels ? 2 : 1;
     const xVisible =
       this._xLabelVisible ?? grid.xLabels.map(() => true);

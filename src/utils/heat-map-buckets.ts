@@ -377,25 +377,75 @@ function axisKey(
   }
 }
 
-function aggregateValues(values: number[], aggregate: AggregateType): number | null {
-  if (!values.length) {
+interface BucketSample {
+  time: number;
+  value: number;
+}
+
+function aggregateSamples(
+  samples: BucketSample[],
+  aggregate: AggregateType
+): number | null {
+  if (!samples.length) {
     return null;
   }
 
   switch (aggregate) {
     case "sum":
     case "count":
-      return values.reduce((sum, value) => sum + value, 0);
+      return samples.reduce((sum, sample) => sum + sample.value, 0);
     case "max":
-      return Math.max(...values);
+      return Math.max(...samples.map((sample) => sample.value));
     case "min":
-      return Math.min(...values);
-    case "last":
-      return values[values.length - 1];
+      return Math.min(...samples.map((sample) => sample.value));
+    case "last": {
+      let latest = samples[0];
+      for (const sample of samples) {
+        if (sample.time >= latest.time) {
+          latest = sample;
+        }
+      }
+      return latest.value;
+    }
     case "mean":
     default:
-      return values.reduce((sum, value) => sum + value, 0) / values.length;
+      return (
+        samples.reduce((sum, sample) => sum + sample.value, 0) / samples.length
+      );
   }
+}
+
+const CALENDAR_AXIS_FIELDS: AxisField[] = ["day", "week", "month"];
+
+/** Calendar buckets need end-of-period values (e.g. tally before midnight reset). */
+export function resolveBucketAggregate(
+  xField: AxisField,
+  yField: AxisField,
+  aggregate: AggregateType,
+  attributes?: Record<string, unknown>
+): AggregateType {
+  if (aggregate === "count") {
+    return "count";
+  }
+
+  const calendarView =
+    CALENDAR_AXIS_FIELDS.includes(xField) ||
+    CALENDAR_AXIS_FIELDS.includes(yField);
+
+  if (!calendarView) {
+    return aggregate;
+  }
+
+  if (isCounterLike(attributes)) {
+    return "max";
+  }
+
+  return "last";
+}
+
+function isCounterLike(attributes?: Record<string, unknown>): boolean {
+  const stateClass = attributes?.state_class;
+  return stateClass === "total_increasing" || stateClass === "total";
 }
 
 function formatHourLabel(hour: number): string {
@@ -529,7 +579,7 @@ export function buildHeatMapGrid(
   const yAxis = buildAxis(yField, window, timeZone, firstWeekday, bucketMs);
   const xKeySet = new Set(xAxis.keys);
   const yKeySet = new Set(yAxis.keys);
-  const bucketMap = new Map<string, number[]>();
+  const bucketMap = new Map<string, BucketSample[]>();
 
   for (const point of points) {
     if (point.time < window.startMs || point.time > window.endMs) {
@@ -547,7 +597,7 @@ export function buildHeatMapGrid(
 
     const key = `${yKey}|${xKey}`;
     const bucket = bucketMap.get(key) ?? [];
-    bucket.push(point.value);
+    bucket.push({ time: point.time, value: point.value });
     bucketMap.set(key, bucket);
   }
 
@@ -555,7 +605,7 @@ export function buildHeatMapGrid(
   const cells: HeatMapCellMeta[][] = yAxis.keys.map((yKey, yIndex) =>
     xAxis.keys.map((xKey, xIndex) => {
       const bucket = bucketMap.get(`${yKey}|${xKey}`) ?? [];
-      const value = aggregateValues(bucket, aggregate);
+      const value = aggregateSamples(bucket, aggregate);
       if (value !== null) {
         values.push(value);
       }

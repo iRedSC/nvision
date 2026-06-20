@@ -81,8 +81,29 @@ export function isBinaryEntity(entityId: string | undefined): boolean {
   return domain === "binary_sensor" || domain === "input_boolean";
 }
 
-export function defaultAggregate(entityId: string | undefined): AggregateType {
-  return isBinaryEntity(entityId) ? "count" : "mean";
+export function isCounterLikeEntity(
+  attributes: Record<string, unknown> | undefined
+): boolean {
+  const stateClass = attributes?.state_class;
+  return stateClass === "total_increasing" || stateClass === "total";
+}
+
+export function defaultAggregate(
+  entityId: string | undefined,
+  attributes?: Record<string, unknown>
+): AggregateType {
+  if (isBinaryEntity(entityId)) {
+    return "count";
+  }
+  if (isCounterLikeEntity(attributes)) {
+    return "last";
+  }
+  return "mean";
+}
+
+/** Statistics summarize whole periods; end-of-period values need raw history. */
+export function prefersRawHistory(aggregate: AggregateType): boolean {
+  return aggregate === "last" || aggregate === "max";
 }
 
 function historyToPoints(
@@ -253,7 +274,7 @@ export async function loadHistoryPoints(
     return fetchHistoryPoints(hass, entityId, start, end, true);
   }
 
-  if (periodHours >= 24) {
+  if (periodHours >= 24 && !prefersRawHistory(aggregate)) {
     try {
       const period = periodHours > 24 * 14 ? "day" : "hour";
       const stats = await fetchStatisticsPoints(
@@ -269,6 +290,25 @@ export async function loadHistoryPoints(
       }
     } catch {
       // Fall back to raw history within recorder retention.
+    }
+  }
+
+  if (periodHours >= 24 && aggregate === "max") {
+    try {
+      const period = periodHours > 24 * 14 ? "day" : "hour";
+      const stats = await fetchStatisticsPoints(
+        hass,
+        entityId,
+        start,
+        end,
+        "max",
+        period
+      );
+      if (stats.length > 0) {
+        return stats;
+      }
+    } catch {
+      // Fall back to raw history below.
     }
   }
 
