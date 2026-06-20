@@ -657,12 +657,14 @@ function simulateParticles(
   motion: number
 ): void {
   const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
-  const minDist = scale * 0.08;
+  const refRadius = scale * 0.012;
   const spring = 0.0032 * motion;
   const repulse = 0.018 * motion;
   const damping = 0.88;
 
   for (const particle of particles) {
+    const particleRadius = orbRadiusForSpeed(particle, scale);
+
     particle.phase +=
       particle.baseOrbitSpeed *
       orbitSpeedMultiplier(particle, scale) *
@@ -676,11 +678,15 @@ function simulateParticles(
       if (other === particle) {
         continue;
       }
+      const otherRadius = orbRadiusForSpeed(other, scale);
+      const pairDist = (particleRadius + otherRadius) * 2.1;
       const dx = particle.x - other.x;
       const dy = particle.y - other.y;
       const dist = Math.hypot(dx, dy);
-      if (dist > 0.5 && dist < minDist) {
-        const push = ((minDist - dist) / minDist) ** 1.2 * repulse * delta;
+      if (dist > 0.5 && dist < pairDist) {
+        const overlap = (pairDist - dist) / pairDist;
+        const otherInfluence = otherRadius / refRadius;
+        const push = overlap ** 1.2 * repulse * otherInfluence * delta;
         particle.vx += (dx / dist) * push;
         particle.vy += (dy / dist) * push;
       }
