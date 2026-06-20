@@ -112,8 +112,10 @@ function cellBackground(
   const color = resolveHeatColor(host, level, mode, config);
   const mix = config.dim_low_values
     ? level * level * 100
-    : 15 + level * 55;
-  const clamped = Math.min(100, Math.max(config.dim_low_values ? 6 : 10, mix));
+    : 12 + level * 38;
+  const clamped = config.dim_low_values
+    ? Math.min(100, Math.max(6, mix))
+    : Math.min(55, Math.max(8, mix));
   return `color-mix(in srgb, ${color} ${clamped}%, var(--card-background-color))`;
 }
 
@@ -1162,14 +1164,10 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       border: 1px solid var(--divider-color);
     }
 
-    @container (max-height: 170px) {
+    @container (max-height: 110px) {
       .stage {
         gap: 4px;
         padding: 8px;
-      }
-
-      .legend-wrap {
-        display: none;
       }
 
       .x-axis-row {
@@ -1178,6 +1176,12 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
       .timeline-axis,
       .cell-value {
+        display: none;
+      }
+    }
+
+    @container (max-width: 160px) {
+      .legend-wrap {
         display: none;
       }
     }
