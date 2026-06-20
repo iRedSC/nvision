@@ -29,7 +29,42 @@ function readUnit(...stateObjs: Array<HassEntity | undefined>): string {
       return unit;
     }
   }
-  return "°";
+  return "";
+}
+
+function readNumericAttribute(
+  stateObj: HassEntity | undefined,
+  key: string
+): number | undefined {
+  const value = stateObj?.attributes?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+export function resolveReactorRange(
+  hass: HomeAssistant,
+  config: ReactorTempCardConfig
+): { min: number; max: number; step: number } {
+  const stateObj = hass.states[config.entity];
+  const targetStateObj = config.target_entity
+    ? hass.states[config.target_entity]
+    : undefined;
+  const source = targetStateObj ?? stateObj;
+
+  const attrMin =
+    readNumericAttribute(source, "min") ??
+    readNumericAttribute(stateObj, "min_temp");
+  const attrMax =
+    readNumericAttribute(source, "max") ??
+    readNumericAttribute(stateObj, "max_temp");
+
+  return {
+    min: config.min ?? attrMin ?? DEFAULT_MIN,
+    max: config.max ?? attrMax ?? DEFAULT_MAX,
+    step: readStep(source ?? stateObj, config.step),
+  };
 }
 
 function readStep(
@@ -161,9 +196,7 @@ export function readReactorTemp(
   const targetStateObj = config.target_entity
     ? hass.states[config.target_entity]
     : undefined;
-  const min = config.min ?? DEFAULT_MIN;
-  const max = config.max ?? DEFAULT_MAX;
-  const step = readStep(targetStateObj ?? stateObj, config.step);
+  const { min, max, step } = resolveReactorRange(hass, config);
   const displayName =
     config.name ||
     stateObj?.attributes.friendly_name ||
@@ -275,27 +308,52 @@ export function normalizeTemp(
   return Math.min(1, Math.max(0, (value - min) / (max - min)));
 }
 
-export function formatTempValue(
+export function formatNumericValue(
+  hass: HomeAssistant | undefined,
   value: number | undefined,
-  unit: string
+  unit: string,
+  stateObj?: HassEntity
 ): string {
   if (value === undefined || !Number.isFinite(value)) {
     return "—";
   }
 
-  const rounded = Math.abs(value - Math.round(value)) < 0.05
-    ? String(Math.round(value))
-    : value.toFixed(1);
+  if (hass?.formatEntityStateToParts && stateObj) {
+    const parts = hass.formatEntityStateToParts(stateObj, String(value));
+    const formatted = parts.map((part) => part.value).join("");
+    if (formatted.length > 0) {
+      return formatted;
+    }
+  }
+
+  const rounded =
+    Math.abs(value - Math.round(value)) < 0.05
+      ? String(Math.round(value))
+      : value.toFixed(1);
+
+  if (!unit) {
+    return rounded;
+  }
+
   const suffix = unit.startsWith("°") ? unit : ` ${unit}`.trimEnd();
   return `${rounded}${suffix}`;
 }
 
-export function formatStatus(direction: ReactorDirection): string {
+export function formatStatusLabel(
+  hass: HomeAssistant | undefined,
+  direction: ReactorDirection
+): string | undefined {
   if (direction === "unknown") {
-    return "monitoring";
+    return undefined;
   }
 
-  return direction;
+  const key = `component.climate.state_attributes.hvac_action.${direction}`;
+  const localized = hass?.localize(key);
+  if (localized && localized !== key) {
+    return localized;
+  }
+
+  return direction.charAt(0).toUpperCase() + direction.slice(1);
 }
 
 export async function setReactorTarget(
@@ -348,8 +406,5 @@ export function readConfigStep(
   hass: HomeAssistant,
   config: ReactorTempCardConfig
 ): number {
-  const stateObj =
-    (config.target_entity ? hass.states[config.target_entity] : undefined) ??
-    hass.states[config.entity];
-  return readStep(stateObj, config.step);
+  return resolveReactorRange(hass, config).step;
 }

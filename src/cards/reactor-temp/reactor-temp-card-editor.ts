@@ -88,7 +88,7 @@ export class NvisionReactorTempCardEditor
     }
 
     if (schema.name === "entity") {
-      return "Current temperature entity";
+      return "Primary entity";
     }
 
     if (schema.name === "target_entity") {

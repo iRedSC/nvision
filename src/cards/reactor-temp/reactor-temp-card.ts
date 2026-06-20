@@ -11,7 +11,12 @@ import {
   ActionHandlers,
   moreInfoInteractions,
 } from "../../utils/action-handlers";
-import { responsiveTypeStyles } from "../../utils/responsive-type";
+import { parseNumericState } from "../../utils/power-lightning";
+import {
+  responsiveStateIconStyles,
+  responsiveTileInfoStyles,
+  responsiveTypeStyles,
+} from "../../utils/responsive-type";
 import type { ReactorTempCardConfig } from "./reactor-temp-card-config";
 import {
   DEFAULT_MAX,
@@ -25,18 +30,19 @@ import {
 import { drawReactorTemp } from "./reactor-temp-render";
 import {
   clampTarget,
-  formatStatus,
-  formatTempValue,
+  formatNumericValue,
+  formatStatusLabel,
   normalizeTemp,
   readConfigStep,
   readReactorTemp,
+  resolveReactorRange,
   setReactorTarget,
 } from "./reactor-temp-state";
 
 registerCustomCard({
   type: REACTOR_TEMP_CARD_NAME,
   name: "Nvision Reactor Temp",
-  description: "Reactor-style temperature sensor and setpoint control",
+  description: "Reactor-style gauge for numeric sensors and setpoint controls",
 });
 
 function prefersReducedMotion(): boolean {
@@ -57,16 +63,11 @@ function pickStubEntity(
     }
 
     const domain = entityId.split(".", 1)[0];
-    if (domain === "climate") {
+    if (domain === "climate" || domain === "number" || domain === "input_number") {
       return entityId;
     }
 
-    if (
-      domain === "sensor" &&
-      (stateObj.attributes.device_class === "temperature" ||
-        stateObj.attributes.unit_of_measurement === "°C" ||
-        stateObj.attributes.unit_of_measurement === "°F")
-    ) {
+    if (parseNumericState(stateObj.state) !== undefined) {
       return entityId;
     }
   }
@@ -93,9 +94,6 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
     return {
       type: `custom:${REACTOR_TEMP_CARD_NAME}`,
       entity: entity ?? "sensor.temperature",
-      min: DEFAULT_MIN,
-      max: DEFAULT_MAX,
-      step: DEFAULT_STEP,
     };
   }
 
@@ -135,9 +133,6 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
     }
 
     this._config = {
-      min: DEFAULT_MIN,
-      max: DEFAULT_MAX,
-      step: DEFAULT_STEP,
       ...moreInfoInteractions(),
       ...config,
     };
@@ -177,10 +172,15 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
   }
 
   private _range(): { min: number; max: number } {
-    return {
-      min: this._config?.min ?? DEFAULT_MIN,
-      max: this._config?.max ?? DEFAULT_MAX,
-    };
+    if (!this.hass || !this._config) {
+      return {
+        min: this._config?.min ?? DEFAULT_MIN,
+        max: this._config?.max ?? DEFAULT_MAX,
+      };
+    }
+
+    const { min, max } = resolveReactorRange(this.hass, this._config);
+    return { min, max };
   }
 
   private _reading() {
@@ -382,18 +382,38 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
     }
 
     const reading = this._reading();
-    const title = reading?.displayName ?? "Reactor Temp";
-    const currentText = formatTempValue(reading?.current, reading?.unit ?? "°");
+    const entityId = this._config.entity;
+    const stateObj = this.hass.states[entityId];
+    const targetStateObj = this._config.target_entity
+      ? this.hass.states[this._config.target_entity]
+      : undefined;
+    const title =
+      this._config.name ||
+      stateObj?.attributes.friendly_name ||
+      entityId ||
+      "Reactor";
+    const currentText = formatNumericValue(
+      this.hass,
+      reading?.current,
+      reading?.unit ?? "",
+      stateObj
+    );
     const targetText =
       reading?.target !== undefined
-        ? formatTempValue(reading.target, reading?.unit ?? "°")
-        : "—";
-    const status = formatStatus(reading?.direction ?? "unknown");
+        ? formatNumericValue(
+            this.hass,
+            reading.target,
+            reading?.unit ?? "",
+            targetStateObj ?? stateObj
+          )
+        : undefined;
+    const valueLine =
+      targetText !== undefined
+        ? `${currentText} → ${targetText}`
+        : currentText;
+    const status = formatStatusLabel(this.hass, reading?.direction ?? "unknown");
+    const subtitle = status ? `${title} · ${status}` : title;
     const canControl = Boolean(reading?.canControl && reading?.target !== undefined);
-    const tempLine =
-      reading?.target !== undefined
-        ? html`${currentText} → ${targetText}`
-        : html`${currentText}`;
 
     return html`
       <ha-card aria-label=${title}>
@@ -432,9 +452,17 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
           }}
         >
           <canvas aria-hidden="true"></canvas>
-          <div class="hud">
-            <div class="hud-row status">status: ${status}</div>
-            <div class="hud-row temps">${tempLine}</div>
+          <div class="content">
+            ${stateObj
+              ? html`<ha-state-icon
+                  .hass=${this.hass}
+                  .stateObj=${stateObj}
+                ></ha-state-icon>`
+              : nothing}
+            <ha-tile-info
+              .primary=${valueLine}
+              .secondary=${subtitle}
+            ></ha-tile-info>
           </div>
         </div>
       </ha-card>
@@ -443,8 +471,11 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
 
   static styles = [
     responsiveTypeStyles,
+    responsiveTileInfoStyles,
+    responsiveStateIconStyles,
     css`
       :host {
+        --tile-color: var(--state-inactive-color);
         display: block;
         height: 100%;
       }
@@ -471,46 +502,35 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
       canvas {
         position: absolute;
         inset: 0;
+        z-index: 0;
         width: 100%;
         height: 100%;
         display: block;
         pointer-events: none;
       }
 
-      .hud {
-        position: absolute;
-        inset: 0;
+      .content {
+        position: relative;
         z-index: 1;
         display: flex;
-        flex-direction: column;
-        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
         padding: 10px 12px;
         box-sizing: border-box;
+        width: 100%;
         pointer-events: none;
-        font-family: var(
-          --code-font-family,
-          ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          Monaco,
-          Consolas,
-          monospace
-        );
-        letter-spacing: 0.04em;
-        text-transform: lowercase;
       }
 
-      .hud-row {
+      ha-state-icon {
+        flex: none;
         color: var(--primary-text-color);
-        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
-        font-size: var(--nv-label-font-size, 0.78rem);
-        opacity: 0.92;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
       }
 
-      .temps {
-        align-self: flex-end;
-        font-size: var(--nv-value-font-size, 0.92rem);
-        font-weight: 500;
+      ha-tile-info {
+        min-width: 0;
+        flex: 1;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
       }
     `,
   ];
