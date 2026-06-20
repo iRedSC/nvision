@@ -40,6 +40,8 @@ export interface ReactorParticle {
   orbitRyScale: number;
   baseOrbitSpeed: number;
   wobbleSpeed: number;
+  vx: number;
+  vy: number;
   isOn: boolean;
   lastState?: string;
   numericNorm: number;
@@ -124,9 +126,32 @@ function applyVisualState(
 
 function orbitSpeedMultiplier(particle: ReactorParticle): number {
   if (particle.kind === "numeric") {
-    return 0.35 + particle.numericNorm * 1.35;
+    const n = particle.numericNorm;
+    return 0.15 + n * n * 5.5;
   }
-  return 1;
+  if (particle.kind === "timer") {
+    return 0.6 + particle.timerUrgency * 2.4;
+  }
+  return 0.75 + particle.seed * 0.5;
+}
+
+function numericRadius(scale: number, numericNorm: number): number {
+  return scale * (0.006 + numericNorm * 0.028);
+}
+
+function defaultOrbRadius(scale: number, kind: ParticleKind): number {
+  switch (kind) {
+    case "toggle":
+      return scale * 0.016;
+    case "light":
+      return scale * 0.011;
+    case "timer":
+      return scale * 0.013;
+    case "numeric":
+      return scale * 0.012;
+    default:
+      return scale * 0.01;
+  }
 }
 
 export function spawnPulse(particle: ReactorParticle, pulses: ReactorPulse[]): void {
@@ -194,8 +219,10 @@ function createParticle(
     slotsOnShell: layout.slotsOnShell,
     orbitTilt: seed * TAU,
     orbitRyScale: 0.62 + seedY * 0.32,
-    baseOrbitSpeed: direction * (0.00055 + seed * 0.00075),
+    baseOrbitSpeed: direction * (0.00085 + seed * 0.0011),
     wobbleSpeed: 0.0016 + seedY * 0.0024,
+    vx: 0,
+    vy: 0,
     isOn: false,
     lastState: state,
     numericNorm: 0.35,
@@ -238,12 +265,12 @@ function layoutMetrics(
   };
 }
 
-export function placeParticle(
+export function orbitTarget(
   particle: ReactorParticle,
   width: number,
   height: number,
   timeMs: number
-): void {
+): { x: number; y: number } {
   const { cx, cy, halfW, halfH } = layoutMetrics(width, height);
   const shellRadius = SHELL_RADII[particle.shell % SHELL_RADII.length];
   const slotAngle =
@@ -260,12 +287,22 @@ export function placeParticle(
   let y = cy + ox * Math.sin(tilt) + oy * Math.cos(tilt);
 
   const t = timeMs * 0.001;
-  const wobble = 0.035 + particle.seed * 0.025;
+  const wobble = 0.028 + particle.seed * 0.018;
   x += Math.cos(t * particle.wobbleSpeed + particle.seed * 11) * rx * wobble;
   y += Math.sin(t * particle.wobbleSpeed * 1.23 + particle.seedY * 9) * ry * wobble;
 
-  particle.x = x;
-  particle.y = y;
+  return { x, y };
+}
+
+export function placeParticle(
+  particle: ReactorParticle,
+  width: number,
+  height: number,
+  timeMs: number
+): void {
+  const target = orbitTarget(particle, width, height, timeMs);
+  particle.x = target.x;
+  particle.y = target.y;
   particle.placed = true;
 }
 
@@ -369,29 +406,21 @@ function drawToggleParticle(
   scale: number,
   timeMs: number
 ): void {
-  const coreRadius = scale * 0.014;
-  const ringRadius = coreRadius * 2.35;
-  const flashSpeed = particle.isOn ? 0.013 : 0.007;
-  const ringAlpha = particle.isOn
-    ? 0.28 + Math.sin(timeMs * flashSpeed + particle.seed * 12) * 0.42
-    : 0.06 + Math.sin(timeMs * flashSpeed + particle.seed * 12) * 0.05;
-  const coreAlpha = particle.isOn ? 0.92 : 0.32;
+  const flashSpeed = particle.isOn ? 0.012 : 0.007;
+  const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 12);
+  const sizePulse = 1 + pulse * (particle.isOn ? 0.42 : 0.14);
+  const coreRadius = defaultOrbRadius(scale, "toggle") * sizePulse;
+  const coreAlpha = particle.isOn ? 0.88 : 0.32;
+  const glow = particle.isOn
+    ? (0.45 + pulse * 0.4) * sizePulse
+    : (0.08 + pulse * 0.04) * sizePulse;
   const hue = pulseHue(particle.seed, timeMs);
 
-  ctx.beginPath();
-  ctx.arc(particle.x, particle.y, coreRadius, 0, TAU);
-  ctx.fillStyle = particle.unavailable
-    ? `hsla(${hue}, 18%, 42%, 0.35)`
+  const color = particle.unavailable
+    ? `hsla(${hue}, 18%, 42%, ${coreAlpha * 0.4})`
     : `hsla(${hue}, ${particle.isOn ? 88 : 42}%, ${particle.isOn ? 62 : 38}%, ${coreAlpha})`;
-  ctx.fill();
 
-  ctx.beginPath();
-  ctx.arc(particle.x, particle.y, ringRadius, 0, TAU);
-  ctx.strokeStyle = particle.unavailable
-    ? `hsla(${hue}, 12%, 45%, 0.12)`
-    : `hsla(${hue}, ${particle.isOn ? 90 : 35}%, ${particle.isOn ? 68 : 40}%, ${ringAlpha})`;
-  ctx.lineWidth = 1.4;
-  ctx.stroke();
+  drawGlowDot(ctx, particle.x, particle.y, coreRadius, color, glow);
 }
 
 function drawLightParticle(
@@ -424,11 +453,11 @@ function drawTimerParticle(
 ): void {
   const urgency = particle.timerUrgency;
   const flashSpeed = 0.005 + urgency * 0.048;
-  const pulse = 0.42 + Math.sin(timeMs * flashSpeed + particle.seed * 10) * 0.38;
-  const alpha = particle.unavailable
-    ? 0.25
-    : Math.min(1, (0.28 + urgency * 0.35) * pulse + 0.2);
-  const radius = scale * (0.012 + urgency * 0.008);
+  const pulse = Math.sin(timeMs * flashSpeed + particle.seed * 10);
+  const sizePulse = 1 + pulse * (0.15 + urgency * 0.35);
+  const coreAlpha = particle.unavailable ? 0.25 : 0.35 + urgency * 0.25;
+  const glow = (0.22 + pulse * 0.3) * (0.3 + urgency * 0.7) * sizePulse;
+  const radius = defaultOrbRadius(scale, "timer") * sizePulse;
   const hue = pulseHue(particle.seed, timeMs);
 
   drawGlowDot(
@@ -436,18 +465,9 @@ function drawTimerParticle(
     particle.x,
     particle.y,
     radius,
-    `hsla(${hue}, 86%, ${58 + urgency * 12}%, ${alpha})`,
-    alpha
+    `hsla(${hue}, 86%, ${58 + urgency * 12}%, ${coreAlpha})`,
+    glow
   );
-
-  if (urgency > 0.05) {
-    const ringAlpha = alpha * 0.45 * pulse;
-    ctx.beginPath();
-    ctx.arc(particle.x, particle.y, radius * 2.1, 0, TAU);
-    ctx.strokeStyle = `hsla(${hue}, 88%, 64%, ${ringAlpha})`;
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-  }
 }
 
 function drawDefaultParticle(
@@ -458,11 +478,11 @@ function drawDefaultParticle(
 ): void {
   const baseRadius =
     particle.kind === "numeric"
-      ? scale * 0.011 + particle.numericNorm * scale * 0.007
-      : scale * 0.013;
+      ? numericRadius(scale, particle.numericNorm)
+      : defaultOrbRadius(scale, particle.kind);
   const alpha = particle.unavailable ? 0.28 : 0.78;
   const color = paletteColor(particle, timeMs, alpha);
-  drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha);
+  drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha * 0.65);
 }
 
 function withAlpha(color: string, alpha: number): string {
@@ -477,35 +497,58 @@ function withAlpha(color: string, alpha: number): string {
   return color;
 }
 
-function applyRepulsion(
+function simulateParticles(
   particles: ReactorParticle[],
   width: number,
   height: number,
+  delta: number,
+  timeMs: number,
   motion: number
 ): void {
   const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
-  const minDist = scale * 0.11;
+  const minDist = scale * 0.13;
+  const spring = 0.0032 * motion;
+  const repulse = 0.11 * motion;
+  const damping = 0.88;
 
   for (const particle of particles) {
-    let x = particle.x;
-    let y = particle.y;
+    particle.phase +=
+      particle.baseOrbitSpeed * orbitSpeedMultiplier(particle) * delta;
+
+    const target = orbitTarget(particle, width, height, timeMs);
+    particle.vx += (target.x - particle.x) * spring * delta;
+    particle.vy += (target.y - particle.y) * spring * delta;
 
     for (const other of particles) {
       if (other === particle) {
         continue;
       }
-      const dx = x - other.x;
-      const dy = y - other.y;
+      const dx = particle.x - other.x;
+      const dy = particle.y - other.y;
       const dist = Math.hypot(dx, dy);
       if (dist > 0.5 && dist < minDist) {
-        const push = ((minDist - dist) / minDist) * scale * 0.018 * motion;
-        x += (dx / dist) * push;
-        y += (dy / dist) * push;
+        const push = ((minDist - dist) / minDist) ** 1.5 * repulse * delta;
+        particle.vx += (dx / dist) * push;
+        particle.vy += (dy / dist) * push;
       }
     }
 
-    particle.x = Math.min(cx + clampX, Math.max(cx - clampX, x));
-    particle.y = Math.min(cy + clampY, Math.max(cy - clampY, y));
+    const toCenterX = cx - particle.x;
+    const toCenterY = cy - particle.y;
+    const centerDist = Math.hypot(toCenterX, toCenterY);
+    const limit = Math.min(clampX, clampY) * 0.96;
+    if (centerDist > limit) {
+      particle.vx += (toCenterX / centerDist) * 0.006 * delta * motion;
+      particle.vy += (toCenterY / centerDist) * 0.006 * delta * motion;
+    }
+
+    particle.vx *= damping;
+    particle.vy *= damping;
+    particle.x += particle.vx * delta * motion * 16;
+    particle.y += particle.vy * delta * motion * 16;
+    particle.x = Math.min(cx + clampX, Math.max(cx - clampX, particle.x));
+    particle.y = Math.min(cy + clampY, Math.max(cy - clampY, particle.y));
+    particle.placed = true;
   }
 }
 
@@ -537,22 +580,17 @@ export function updateParticles(
 
   if (hass) {
     for (const particle of particles) {
-      if (particle.kind === "timer" || particle.kind === "light") {
+      if (
+        particle.kind === "timer" ||
+        particle.kind === "light" ||
+        particle.kind === "numeric"
+      ) {
         applyVisualState(particle, hass, min, max);
       }
     }
   }
 
-  for (const particle of particles) {
-    particle.phase +=
-      particle.baseOrbitSpeed *
-      orbitSpeedMultiplier(particle) *
-      delta *
-      motion;
-    placeParticle(particle, width, height, timeMs);
-  }
-
-  applyRepulsion(particles, width, height, motion);
+  simulateParticles(particles, width, height, delta, timeMs, motion);
 }
 
 export function drawPulses(
@@ -563,15 +601,24 @@ export function drawPulses(
 ): void {
   for (const pulse of pulses) {
     const t = pulse.age / PULSE_LIFE_MS;
-    const radius = scale * (0.022 + t * 0.42);
-    const alpha = (1 - t) * 0.52;
+    const radius = scale * (0.04 + t * 0.55);
+    const alpha = (1 - t) ** 1.4 * 0.09;
     const hue = pulseHue(pulse.seed, timeMs);
-
+    const gradient = ctx.createRadialGradient(
+      pulse.x,
+      pulse.y,
+      radius * 0.15,
+      pulse.x,
+      pulse.y,
+      radius
+    );
+    gradient.addColorStop(0, `hsla(${hue}, 82%, 62%, 0)`);
+    gradient.addColorStop(0.55, `hsla(${hue}, 82%, 62%, ${alpha})`);
+    gradient.addColorStop(1, `hsla(${hue}, 82%, 62%, 0)`);
     ctx.beginPath();
     ctx.arc(pulse.x, pulse.y, radius, 0, TAU);
-    ctx.strokeStyle = `hsla(${hue}, 88%, 64%, ${alpha})`;
-    ctx.lineWidth = 1.2 + (1 - t) * 2.2;
-    ctx.stroke();
+    ctx.fillStyle = gradient;
+    ctx.fill();
   }
 }
 
