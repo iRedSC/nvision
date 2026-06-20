@@ -136,7 +136,6 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     };
     this._entityKey = "";
     this._pulses = [];
-    this._resetSlots();
   }
 
   public getCardSize(): number {
@@ -197,7 +196,6 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     if (key + configKey !== this._entityKey) {
       this._pulses = [];
       this._entityKey = key + configKey;
-      this._resetSlots();
     }
 
     const { particles, changedIds } = syncParticles(
@@ -216,20 +214,9 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
   }
 
-  private _resetSlots(): void {
-    this._slotIds = Array(INFO_SLOT_COUNT).fill("");
-    this._slotAge = Array(INFO_SLOT_COUNT).fill(0);
-  }
-
   private _assignToOldestSlot(entityId: string): void {
     const slots = [...this._slotIds];
     const ages = [...this._slotAge];
-
-    for (let index = 0; index < INFO_SLOT_COUNT; index += 1) {
-      if (slots[index] === entityId) {
-        slots[index] = "";
-      }
-    }
 
     let oldestIndex = 0;
     for (let index = 1; index < INFO_SLOT_COUNT; index += 1) {
