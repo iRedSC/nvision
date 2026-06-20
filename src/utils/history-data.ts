@@ -31,6 +31,26 @@ export type CallWS = <T = unknown>(
   message: Record<string, unknown>
 ) => Promise<T>;
 
+export function formatHistoryError(
+  error: unknown,
+  fallback = "Could not load history"
+): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return fallback;
+}
+
 export function resolveCallWS(hass: HomeAssistant): CallWS {
   if (hass.callWS) {
     return hass.callWS.bind(hass);

@@ -23,6 +23,7 @@ import {
 } from "../../utils/heat-map-buckets";
 import {
   defaultAggregate,
+  formatHistoryError,
   loadHistoryPoints,
   resolveCallWS,
 } from "../../utils/history-data";
@@ -204,7 +205,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     }
 
     const loadKey = this._computeLoadKey();
-    if (!loadKey || loadKey === this._loadKey) {
+    if (!loadKey || !this.hass || loadKey === this._loadKey) {
       return;
     }
 
@@ -269,8 +270,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       if (fetchVersion !== this._fetchVersion) {
         return;
       }
-      this._error =
-        error instanceof Error ? error.message : "Could not load history";
+      this._error = formatHistoryError(error);
       this._grid = undefined;
     } finally {
       if (fetchVersion === this._fetchVersion) {
