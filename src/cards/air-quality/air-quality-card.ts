@@ -8,6 +8,10 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { resolveThemeColor } from "../../utils/colors";
 import { responsiveTypeStyles } from "../../utils/responsive-type";
 import type { AirQualityCardConfig } from "./air-quality-card-config";
@@ -193,10 +197,17 @@ export class NvisionAirQualityCard extends LitElement implements LovelaceCard {
   private _mist: MistBlob[] = [];
   private _resizeObserver?: ResizeObserver;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: AirQualityCardConfig): void {
     this._config = {
       min: DEFAULT_MIN,
       max: DEFAULT_MAX,
+      ...moreInfoInteractions(),
       ...config,
     };
   }
@@ -571,7 +582,18 @@ export class NvisionAirQualityCard extends LitElement implements LovelaceCard {
           <canvas aria-hidden="true"></canvas>
           <div class="clear-overlay" aria-hidden="true"></div>
           <div class="haze-overlay" aria-hidden="true"></div>
-          <div class="body">
+          <div
+            class="body"
+            role="button"
+            tabindex="0"
+            @click=${this._actions.bind().click}
+            @dblclick=${this._actions.bind().dblclick}
+            @keydown=${this._actions.bind().keydown}
+            @pointerdown=${this._actions.bind().pointerdown}
+            @pointerup=${this._actions.bind().pointerup}
+            @pointerleave=${this._actions.bind().pointerleave}
+            @pointercancel=${this._actions.bind().pointercancel}
+          >
             <div class="gauge-wrap">
               ${this._renderGauge(
                 gaugeValue,
@@ -664,6 +686,7 @@ export class NvisionAirQualityCard extends LitElement implements LovelaceCard {
       height: 100%;
       padding: var(--ha-space-3, 12px);
       box-sizing: border-box;
+      cursor: pointer;
       filter: blur(calc(var(--haze, 0) * 1.6px))
         saturate(calc(1 + var(--clarity, 0) * 0.14))
         contrast(calc(1 + var(--clarity, 0) * 0.05));

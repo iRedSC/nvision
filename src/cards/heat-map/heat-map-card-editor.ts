@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { HeatMapCardConfig } from "./heat-map-card-config";
 import {
   COLOR_MODE_OPTIONS,
@@ -59,6 +63,7 @@ const BASE_SCHEMA: HaFormSchema[] = [
       { name: "dim_low_values", selector: { boolean: {} } },
     ],
   },
+  interactionEditorSchema(),
 ];
 
 const CUSTOM_COLOR_SCHEMA: HaFormSchema[] = [
@@ -159,8 +164,11 @@ export class NvisionHeatMapCardEditor
       return "Current value";
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

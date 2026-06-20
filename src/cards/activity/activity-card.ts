@@ -8,6 +8,10 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { resolveConfigColor } from "../../utils/colors";
 import { responsiveTypeStyles } from "../../utils/responsive-type";
 import type { ActivityCardConfig } from "./activity-card-config";
@@ -81,9 +85,16 @@ export class NvisionActivityCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: ActivityCardConfig;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: ActivityCardConfig): void {
     this._config = {
       speed: DEFAULT_SPEED,
+      ...moreInfoInteractions(),
       ...config,
     };
   }
@@ -204,7 +215,18 @@ export class NvisionActivityCard extends LitElement implements LovelaceCard {
           "--anim-speed": String(speed),
         })}
       >
-        <div class="body">
+        <div
+          class="body"
+          role="button"
+          tabindex="0"
+          @click=${this._actions.bind().click}
+          @dblclick=${this._actions.bind().dblclick}
+          @keydown=${this._actions.bind().keydown}
+          @pointerdown=${this._actions.bind().pointerdown}
+          @pointerup=${this._actions.bind().pointerup}
+          @pointerleave=${this._actions.bind().pointerleave}
+          @pointercancel=${this._actions.bind().pointercancel}
+        >
           <div class="stage ${mode}">${this._renderScene(mode)}</div>
           <p class="title">${primary}</p>
           <p class="subtitle">${label}</p>
@@ -235,6 +257,7 @@ export class NvisionActivityCard extends LitElement implements LovelaceCard {
       height: 100%;
       padding: var(--ha-space-3, 12px);
       box-sizing: border-box;
+      cursor: pointer;
     }
 
     .stage {

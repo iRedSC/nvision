@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { LiquidCardConfig } from "./liquid-card-config";
 import {
   DEFAULT_LIQUID_STYLE,
@@ -50,6 +54,7 @@ const SCHEMA: HaFormSchema[] = [
   { name: "level_color", selector: { boolean: {} } },
   { name: "level_color_invert", selector: { boolean: {} } },
   { name: "color", selector: { color_rgb: {} } },
+  interactionEditorSchema(),
 ];
 
 @customElement(LIQUID_CARD_EDITOR_NAME)
@@ -109,8 +114,11 @@ export class NvisionLiquidCardEditor
       return "Liquid style";
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

@@ -7,6 +7,10 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { resolveThemeColor } from "../../utils/colors";
 import { formatStateWithUnit } from "../../utils/entity-state";
 import {
@@ -121,6 +125,12 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   private _dots: ScopeDot[] = buildDots(24);
   private _resizeObserver?: ResizeObserver;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: WaveformCardConfig): void {
     this._config = {
       min: DEFAULT_MIN,
@@ -131,6 +141,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       shake_at: DEFAULT_SHAKE_AT,
       shake_peak: DEFAULT_SHAKE_PEAK,
       shake_speed: DEFAULT_SHAKE_SPEED,
+      ...moreInfoInteractions(),
       ...config,
     };
     this._syncDots();
@@ -436,7 +447,18 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       <ha-card>
         <div class="stage">
           <canvas aria-hidden="true"></canvas>
-          <div class="content">
+          <div
+            class="content"
+            role="button"
+            tabindex="0"
+            @click=${this._actions.bind().click}
+            @dblclick=${this._actions.bind().dblclick}
+            @keydown=${this._actions.bind().keydown}
+            @pointerdown=${this._actions.bind().pointerdown}
+            @pointerup=${this._actions.bind().pointerup}
+            @pointerleave=${this._actions.bind().pointerleave}
+            @pointercancel=${this._actions.bind().pointercancel}
+          >
             ${stateObj
               ? html`<ha-state-icon
                   .hass=${this.hass}
@@ -497,6 +519,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       width: 100%;
       height: 100%;
       min-height: 56px;
+      cursor: pointer;
     }
 
     ha-state-icon {

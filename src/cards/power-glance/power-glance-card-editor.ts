@@ -4,6 +4,10 @@ import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
 import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
+import {
   DEFAULT_EFFECTS_MAX,
   DEFAULT_EFFECTS_MIN,
   DEFAULT_POWER_MAX,
@@ -60,6 +64,7 @@ const SCHEMA: HaFormSchema[] = [
   },
   { name: "color", selector: { color_rgb: {} } },
   { name: "icon", selector: { icon: {} } },
+  interactionEditorSchema(),
 ];
 
 @customElement(POWER_GLANCE_CARD_EDITOR_NAME)
@@ -122,8 +127,11 @@ export class NvisionPowerGlanceCardEditor
       return "Source icon";
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

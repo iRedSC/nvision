@@ -7,6 +7,10 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { formatStateWithUnit } from "../../utils/entity-state";
 import {
   responsiveStateIconStyles,
@@ -93,12 +97,19 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
 
   private _renderer?: PowerLightningRenderer;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: PowerDrawCardConfig): void {
     this._config = {
       min: DEFAULT_POWER_MIN,
       max: DEFAULT_POWER_MAX,
       effects_min: DEFAULT_EFFECTS_MIN,
       effects_max: DEFAULT_EFFECTS_MAX,
+      ...moreInfoInteractions(),
       ...config,
     };
   }
@@ -258,7 +269,18 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
     return html`
       <ha-card class=${overMax ? "over-max" : ""}>
         <div class="stage">
-          <div class="content">
+          <div
+            class="content"
+            role="button"
+            tabindex="0"
+            @click=${this._actions.bind().click}
+            @dblclick=${this._actions.bind().dblclick}
+            @keydown=${this._actions.bind().keydown}
+            @pointerdown=${this._actions.bind().pointerdown}
+            @pointerup=${this._actions.bind().pointerup}
+            @pointerleave=${this._actions.bind().pointerleave}
+            @pointercancel=${this._actions.bind().pointercancel}
+          >
             ${stateObj
               ? html`<ha-state-icon
                   class="entity-icon glow-icon"
@@ -320,6 +342,7 @@ export class NvisionPowerDrawCard extends LitElement implements LovelaceCard {
       box-sizing: border-box;
       height: 100%;
       min-height: 56px;
+      cursor: pointer;
     }
 
     ha-state-icon {

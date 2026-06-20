@@ -7,6 +7,10 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { formatStateWithUnit } from "../../utils/entity-state";
 import {
   responsiveStateIconStyles,
@@ -45,8 +49,17 @@ export class NvisionBlankCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: BlankCardConfig;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: BlankCardConfig): void {
-    this._config = config;
+    this._config = {
+      ...moreInfoInteractions(),
+      ...config,
+    };
   }
 
   public getCardSize(): number {
@@ -75,7 +88,18 @@ export class NvisionBlankCard extends LitElement implements LovelaceCard {
 
     return html`
       <ha-card>
-        <div class="content">
+        <div
+          class="content"
+          role="button"
+          tabindex="0"
+          @click=${this._actions.bind().click}
+          @dblclick=${this._actions.bind().dblclick}
+          @keydown=${this._actions.bind().keydown}
+          @pointerdown=${this._actions.bind().pointerdown}
+          @pointerup=${this._actions.bind().pointerup}
+          @pointerleave=${this._actions.bind().pointerleave}
+          @pointercancel=${this._actions.bind().pointercancel}
+        >
           ${stateObj
             ? html`<ha-state-icon
                 .hass=${this.hass}
@@ -113,6 +137,7 @@ export class NvisionBlankCard extends LitElement implements LovelaceCard {
       box-sizing: border-box;
       height: 100%;
       min-height: 56px;
+      cursor: pointer;
     }
 
     ha-state-icon {

@@ -3,12 +3,17 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { BlankCardConfig } from "./blank-card-config";
 import { BLANK_CARD_EDITOR_NAME } from "./const";
 
 const SCHEMA: HaFormSchema[] = [
   { name: "entity", selector: { entity: {} } },
   { name: "name", selector: { text: {} } },
+  interactionEditorSchema(),
 ];
 
 @customElement(BLANK_CARD_EDITOR_NAME)
@@ -33,8 +38,11 @@ export class NvisionBlankCardEditor
       );
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

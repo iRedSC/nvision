@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { CircleGaugeCardConfig } from "./circle-gauge-card-config";
 import {
   CIRCLE_GAUGE_CARD_EDITOR_NAME,
@@ -34,6 +38,7 @@ const SCHEMA: HaFormSchema[] = [
   { name: "color", selector: { color_rgb: {} } },
   { name: "track_color", selector: { color_rgb: {} } },
   { name: "reverse", selector: { boolean: {} } },
+  interactionEditorSchema("toggle"),
 ];
 
 @customElement(CIRCLE_GAUGE_CARD_EDITOR_NAME)
@@ -88,8 +93,11 @@ export class NvisionCircleGaugeCardEditor
       return "Reverse";
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

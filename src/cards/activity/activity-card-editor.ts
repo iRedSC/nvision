@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { ActivityCardConfig } from "./activity-card-config";
 import { ACTIVITY_CARD_EDITOR_NAME, DEFAULT_SPEED } from "./const";
 
@@ -16,6 +20,7 @@ const SCHEMA: HaFormSchema[] = [
     default: DEFAULT_SPEED,
     selector: { number: { min: 0.25, max: 3, step: 0.05 } },
   },
+  interactionEditorSchema(),
 ];
 
 @customElement(ACTIVITY_CARD_EDITOR_NAME)
@@ -53,8 +58,11 @@ export class NvisionActivityCardEditor
       return this.hass.localize("ui.panel.lovelace.editor.card.generic.entity");
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

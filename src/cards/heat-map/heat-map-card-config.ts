@@ -24,4 +24,5 @@ export interface HeatMapCardConfig extends LovelaceCardConfig {
   dim_low_values?: boolean;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
+  double_tap_action?: ActionConfig;
 }

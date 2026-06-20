@@ -7,6 +7,10 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { formatStateWithUnit } from "../../utils/entity-state";
 import {
   responsiveStateIconStyles,
@@ -104,6 +108,12 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
 
   private _displayIntensities = new Map<string, number>();
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: PowerGlanceCardConfig): void {
     this._config = {
       entities: [],
@@ -112,6 +122,7 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
       max: DEFAULT_POWER_MAX,
       effects_min: DEFAULT_EFFECTS_MIN,
       effects_max: DEFAULT_EFFECTS_MAX,
+      ...moreInfoInteractions(),
       ...config,
     };
 
@@ -326,7 +337,18 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
               const value = formatStateWithUnit(stateObj);
 
               return html`
-                <div class="entity">
+                <div
+                  class="entity"
+                  role="button"
+                  tabindex="0"
+                  @click=${this._actions.bind(entityId).click}
+                  @dblclick=${this._actions.bind(entityId).dblclick}
+                  @keydown=${this._actions.bind(entityId).keydown}
+                  @pointerdown=${this._actions.bind(entityId).pointerdown}
+                  @pointerup=${this._actions.bind(entityId).pointerup}
+                  @pointerleave=${this._actions.bind(entityId).pointerleave}
+                  @pointercancel=${this._actions.bind(entityId).pointercancel}
+                >
                   ${stateObj
                     ? html`<ha-state-icon
                         class="entity-icon glow-icon"
@@ -403,6 +425,7 @@ export class NvisionPowerGlanceCard extends LitElement implements LovelaceCard {
       align-items: center;
       gap: 8px;
       min-width: 0;
+      cursor: pointer;
     }
 
     ha-state-icon {

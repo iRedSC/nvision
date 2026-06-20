@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { AirQualityCardConfig } from "./air-quality-card-config";
 import {
   AIR_QUALITY_CARD_EDITOR_NAME,
@@ -55,6 +59,7 @@ const SCHEMA: HaFormSchema[] = [
       { name: "color_sky", selector: { color_rgb: {} } },
     ],
   },
+  interactionEditorSchema(),
 ];
 
 @customElement(AIR_QUALITY_CARD_EDITOR_NAME)
@@ -121,8 +126,11 @@ export class NvisionAirQualityCardEditor
       return "Sky glow color";
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

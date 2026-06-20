@@ -31,7 +31,10 @@ import {
   resolveCallWS,
   type AggregateType,
 } from "../../utils/history-data";
-import { handleLovelaceAction } from "../../utils/lovelace-actions";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+} from "../../utils/action-handlers";
 import { responsiveTypeStyles } from "../../utils/responsive-type";
 import type { ColorMode, HeatMapCardConfig } from "./heat-map-card-config";
 import {
@@ -271,6 +274,12 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
   private _observedWrap?: Element;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   private _entityAttributes(): Record<string, unknown> | undefined {
     const entity = this._config?.entity;
     if (!entity || !this.hass) {
@@ -324,8 +333,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       show_current: true,
       show_cell_values: false,
       dim_low_values: false,
-      tap_action: { action: "more-info" },
-      hold_action: { action: "more-info" },
+      ...moreInfoInteractions(),
       ...config,
       color_mode: resolveColorMode(config.color_mode),
     };
@@ -525,14 +533,6 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
         this._loading = false;
       }
     }
-  }
-
-  private _handleHeaderClick(ev: Event): void {
-    ev.stopPropagation();
-    if (!this.hass || !this._config) {
-      return;
-    }
-    handleLovelaceAction(this, this.hass, this._config, "tap");
   }
 
   private _showPopover(
@@ -879,7 +879,18 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     return html`
       <ha-card>
         <div class="stage">
-          <div class="header" @click=${this._handleHeaderClick}>
+          <div
+            class="header"
+            role="button"
+            tabindex="0"
+            @click=${this._actions.bind().click}
+            @dblclick=${this._actions.bind().dblclick}
+            @keydown=${this._actions.bind().keydown}
+            @pointerdown=${this._actions.bind().pointerdown}
+            @pointerup=${this._actions.bind().pointerup}
+            @pointerleave=${this._actions.bind().pointerleave}
+            @pointercancel=${this._actions.bind().pointercancel}
+          >
             ${stateObj
               ? html`<ha-state-icon
                   .hass=${this.hass}

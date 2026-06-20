@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
 import { NvisionBaseElement } from "../../utils/base-element";
+import {
+  computeInteractionLabel,
+  interactionEditorSchema,
+} from "../../utils/interaction-schema";
 import type { WaveformCardConfig } from "./waveform-card-config";
 import {
   DEFAULT_LAYOUT,
@@ -84,6 +88,7 @@ const SCHEMA: HaFormSchema[] = [
     default: DEFAULT_SHAKE_SPEED,
     selector: { number: { min: 0.15, max: 1.5, step: 0.05 } },
   },
+  interactionEditorSchema(),
 ];
 
 @customElement(WAVEFORM_CARD_EDITOR_NAME)
@@ -150,8 +155,11 @@ export class NvisionWaveformCardEditor
       return "Shake speed";
     }
 
-    return this.hass.localize(
-      `ui.panel.lovelace.editor.card.generic.${schema.name}`
+    return (
+      computeInteractionLabel(this.hass, schema) ??
+      this.hass.localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`
+      )
     );
   };
 

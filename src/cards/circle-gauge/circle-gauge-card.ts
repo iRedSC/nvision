@@ -9,6 +9,11 @@ import type {
   LovelaceGridOptions,
 } from "../../types";
 import { registerCustomCard } from "../../utils/custom-cards";
+import {
+  ActionHandlers,
+  moreInfoInteractions,
+  toggleInteractions,
+} from "../../utils/action-handlers";
 import { resolveThemeColor } from "../../utils/colors";
 import { responsiveTypeStyles } from "../../utils/responsive-type";
 import type { CircleGaugeCardConfig } from "./circle-gauge-card-config";
@@ -229,10 +234,21 @@ export class NvisionCircleGaugeCard extends LitElement implements LovelaceCard {
 
   private _rescaleOnConnect = false;
 
+  private _actions = new ActionHandlers(
+    () => this,
+    () => this.hass,
+    () => this._config
+  );
+
   public setConfig(config: CircleGaugeCardConfig): void {
+    const interactions = config.entity?.startsWith("timer.")
+      ? toggleInteractions()
+      : moreInfoInteractions();
+
     this._config = {
       min: DEFAULT_MIN,
       max: DEFAULT_MAX,
+      ...interactions,
       ...config,
     };
   }
@@ -470,7 +486,18 @@ export class NvisionCircleGaugeCard extends LitElement implements LovelaceCard {
 
     return html`
       <ha-card>
-        <div class="body">
+        <div
+          class="body"
+          role="button"
+          tabindex="0"
+          @click=${this._actions.bind().click}
+          @dblclick=${this._actions.bind().dblclick}
+          @keydown=${this._actions.bind().keydown}
+          @pointerdown=${this._actions.bind().pointerdown}
+          @pointerup=${this._actions.bind().pointerup}
+          @pointerleave=${this._actions.bind().pointerleave}
+          @pointercancel=${this._actions.bind().pointercancel}
+        >
           <div class="gauge-wrap">
             ${this._renderGauge(value, valueText, unit, gaugeColor, trackColor)}
           </div>
@@ -503,6 +530,7 @@ export class NvisionCircleGaugeCard extends LitElement implements LovelaceCard {
       min-height: 0;
       padding: var(--ha-space-3, 12px);
       box-sizing: border-box;
+      cursor: pointer;
     }
 
     .gauge-wrap {
