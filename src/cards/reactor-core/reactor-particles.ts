@@ -14,29 +14,38 @@ import {
 
 export type ParticleKind = "binary" | "numeric" | "other";
 
+/** Normalized radii for concentric orbital shells (fraction of usable half-axis). */
+const SHELL_RADII = [0.42, 0.58, 0.72, 0.84];
+
 export interface ReactorParticle {
   entityId: string;
   kind: ParticleKind;
   seed: number;
+  seedY: number;
   x: number;
   y: number;
-  angle: number;
-  /** Fraction of usable half-axis (width/height), spread across inner–outer shells */
-  orbitRxFactor: number;
-  orbitRyFactor: number;
+  /** Accumulated orbit phase (radians). */
+  phase: number;
+  shell: number;
+  slot: number;
+  slotsOnShell: number;
+  /** Ellipse plane rotation (radians). */
+  orbitTilt: number;
+  /** Vertical squash for tilted ellipses. */
+  orbitRyScale: number;
   orbitSpeed: number;
-  epicycleRxFactor: number;
-  epicycleRyFactor: number;
-  epicycleSpeed: number;
+  wobbleSpeed: number;
   trail: { x: number; y: number }[];
   trailCapacity: number;
   binaryOn: boolean;
   flash: number;
   numericNorm: number;
   unavailable: boolean;
+  placed: boolean;
 }
 
 const PALETTE_HUES = [185, 198, 215, 248, 278, 312, 42];
+const TAU = Math.PI * 2;
 
 function hashSeed(value: string): number {
   let hash = 2166136261;
@@ -89,7 +98,12 @@ function isBinaryOn(hass: HomeAssistant, entityId: string): boolean {
   if (state === undefined || state === "unavailable" || state === "unknown") {
     return false;
   }
-  return state === "on" || state === "true" || state === "open" || state === "home";
+  return (
+    state === "on" ||
+    state === "true" ||
+    state === "open" ||
+    state === "home"
+  );
 }
 
 function numericNormForEntity(
@@ -110,9 +124,23 @@ function trailCapacityFor(kind: ParticleKind, numericNorm: number): number {
     return 0;
   }
   if (kind === "numeric") {
-    return Math.round(5 + numericNorm * 16);
+    return Math.round(4 + numericNorm * 12);
   }
-  return 10;
+  return 8;
+}
+
+function shellLayout(
+  index: number,
+  count: number
+): { shell: number; slot: number; slotsOnShell: number } {
+  const shellCount = Math.min(
+    SHELL_RADII.length,
+    Math.max(2, Math.ceil(Math.sqrt(count)))
+  );
+  const shell = index % shellCount;
+  const slotsOnShell = Math.ceil(count / shellCount);
+  const slot = Math.floor(index / shellCount) % slotsOnShell;
+  return { shell, slot, slotsOnShell };
 }
 
 export function discoverEntityIds(
@@ -144,23 +172,6 @@ export function discoverEntityIds(
     .slice(0, maxParticles);
 }
 
-function orbitFactors(
-  seed: number,
-  seedY: number,
-  band: number
-): { rx: number; ry: number; epRx: number; epRy: number } {
-  const shell = 0.34 + band * 0.58;
-  const jitter = (seed - 0.5) * 0.14;
-  const rx = Math.min(0.94, Math.max(0.28, shell + jitter));
-  const ry = Math.min(0.94, Math.max(0.28, shell + (seedY - 0.5) * 0.14));
-  return {
-    rx,
-    ry,
-    epRx: 0.06 + seed * 0.1,
-    epRy: 0.06 + seedY * 0.08,
-  };
-}
-
 function createParticle(
   hass: HomeAssistant,
   entityId: string,
@@ -171,38 +182,93 @@ function createParticle(
 ): ReactorParticle {
   const seed = hashSeed(entityId);
   const seedY = hashSeed(`${entityId}:y`);
-  const band = count > 1 ? index / (count - 1) : 0.5;
-  const orbit = orbitFactors(seed, seedY, band);
+  const layout = shellLayout(index, count);
   const kind = classifyParticleKind(hass, entityId);
   const numericNorm = numericNormForEntity(hass, entityId, min, max);
   const state = hass.states[entityId]?.state;
+  const direction = layout.shell % 2 === 0 ? 1 : -1;
 
   return {
     entityId,
     kind,
     seed,
+    seedY,
     x: 0,
     y: 0,
-    angle: seed * Math.PI * 2,
-    orbitRxFactor: orbit.rx,
-    orbitRyFactor: orbit.ry,
-    orbitSpeed: 0.0007 + seed * 0.0012,
-    epicycleRxFactor: orbit.epRx,
-    epicycleRyFactor: orbit.epRy,
-    epicycleSpeed: 0.0011 + seed * 0.0018,
+    phase: seed * TAU,
+    shell: layout.shell,
+    slot: layout.slot,
+    slotsOnShell: layout.slotsOnShell,
+    orbitTilt: seed * TAU,
+    orbitRyScale: 0.62 + seedY * 0.32,
+    orbitSpeed: direction * (0.00055 + seed * 0.00075),
+    wobbleSpeed: 0.0016 + seedY * 0.0024,
     trail: [],
     trailCapacity: trailCapacityFor(kind, numericNorm),
     binaryOn: isBinaryOn(hass, entityId),
     flash: 0,
     numericNorm,
     unavailable: state === "unavailable" || state === "unknown",
+    placed: false,
   };
+}
+
+function layoutMetrics(
+  width: number,
+  height: number
+): { cx: number; cy: number; halfW: number; halfH: number; scale: number } {
+  const cx = width / 2;
+  const cy = height / 2;
+  const padX = Math.max(10, width * 0.06);
+  const padY = Math.max(10, height * 0.06);
+  return {
+    cx,
+    cy,
+    halfW: Math.max(1, width / 2 - padX),
+    halfH: Math.max(1, height / 2 - padY),
+    scale: Math.min(width, height),
+  };
+}
+
+/** Deterministic position on a tilted elliptical shell. */
+export function placeParticle(
+  particle: ReactorParticle,
+  width: number,
+  height: number,
+  timeMs: number
+): void {
+  const { cx, cy, halfW, halfH } = layoutMetrics(width, height);
+  const shellRadius = SHELL_RADII[particle.shell % SHELL_RADII.length];
+  const slotAngle =
+    (particle.slot / Math.max(1, particle.slotsOnShell)) * TAU +
+    particle.seed * 0.55;
+  const angle = slotAngle + particle.phase;
+  const rx = halfW * shellRadius;
+  const ry = halfH * shellRadius * particle.orbitRyScale;
+
+  const ox = Math.cos(angle) * rx;
+  const oy = Math.sin(angle) * ry;
+  const tilt = particle.orbitTilt;
+  let x = cx + ox * Math.cos(tilt) - oy * Math.sin(tilt);
+  let y = cy + ox * Math.sin(tilt) + oy * Math.cos(tilt);
+
+  const t = timeMs * 0.001;
+  const wobble = 0.035 + particle.seed * 0.025;
+  x += Math.cos(t * particle.wobbleSpeed + particle.seed * 11) * rx * wobble;
+  y += Math.sin(t * particle.wobbleSpeed * 1.23 + particle.seedY * 9) * ry * wobble;
+
+  particle.x = x;
+  particle.y = y;
+  particle.placed = true;
 }
 
 export function syncParticles(
   particles: ReactorParticle[],
   hass: HomeAssistant,
-  config: ReactorCoreCardConfig
+  config: ReactorCoreCardConfig,
+  width = 0,
+  height = 0,
+  timeMs = 0
 ): ReactorParticle[] {
   const min = config.min ?? DEFAULT_MIN;
   const max = config.max ?? DEFAULT_MAX;
@@ -214,19 +280,15 @@ export function syncParticles(
     const entityId = entityIds[index];
     const existing = byId.get(entityId);
     if (existing) {
+      const layout = shellLayout(index, entityIds.length);
       const kind = classifyParticleKind(hass, entityId);
       const numericNorm = numericNormForEntity(hass, entityId, min, max);
       const binaryOn = isBinaryOn(hass, entityId);
-      const band = entityIds.length > 1 ? index / (entityIds.length - 1) : 0.5;
-      const orbit = orbitFactors(
-        existing.seed,
-        hashSeed(`${entityId}:y`),
-        band
-      );
-      existing.orbitRxFactor = orbit.rx;
-      existing.orbitRyFactor = orbit.ry;
-      existing.epicycleRxFactor = orbit.epRx;
-      existing.epicycleRyFactor = orbit.epRy;
+
+      existing.shell = layout.shell;
+      existing.slot = layout.slot;
+      existing.slotsOnShell = layout.slotsOnShell;
+
       if (binaryOn !== existing.binaryOn) {
         existing.flash = 1;
       }
@@ -240,11 +302,26 @@ export function syncParticles(
       if (existing.trail.length > existing.trailCapacity) {
         existing.trail = existing.trail.slice(-existing.trailCapacity);
       }
+
+      if (width > 0 && height > 0) {
+        placeParticle(existing, width, height, timeMs);
+      }
       next.push(existing);
       continue;
     }
 
-    next.push(createParticle(hass, entityId, min, max, index, entityIds.length));
+    const created = createParticle(
+      hass,
+      entityId,
+      min,
+      max,
+      index,
+      entityIds.length
+    );
+    if (width > 0 && height > 0) {
+      placeParticle(created, width, height, timeMs);
+    }
+    next.push(created);
   }
 
   return next;
@@ -282,6 +359,11 @@ function pushTrail(particle: ReactorParticle): void {
     return;
   }
 
+  const last = particle.trail[particle.trail.length - 1];
+  if (last && Math.hypot(particle.x - last.x, particle.y - last.y) < 2.5) {
+    return;
+  }
+
   particle.trail.push({ x: particle.x, y: particle.y });
   if (particle.trail.length > particle.trailCapacity) {
     particle.trail.shift();
@@ -303,8 +385,8 @@ function drawTrail(
     ctx.beginPath();
     ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
     ctx.lineTo(trail[i].x, trail[i].y);
-    ctx.strokeStyle = particleColor(particle, timeMs, 0.08 + t * 0.42);
-    ctx.lineWidth = 1 + t * 2.2;
+    ctx.strokeStyle = particleColor(particle, timeMs, 0.06 + t * 0.34);
+    ctx.lineWidth = 0.8 + t * 1.6;
     ctx.stroke();
   }
 }
@@ -316,17 +398,45 @@ function drawGlowDot(
   radius: number,
   color: string,
   glow: number,
-  haloScale = 0.45
+  haloScale = 0.5
 ): void {
   ctx.beginPath();
-  ctx.arc(x, y, radius * (1 + glow * haloScale), 0, Math.PI * 2);
-  ctx.fillStyle = color.replace(/[\d.]+\)$/, `${0.08 + glow * 0.12})`);
+  ctx.arc(x, y, radius * (1 + glow * haloScale), 0, TAU);
+  ctx.fillStyle = color.replace(/[\d.]+\)$/, `${0.07 + glow * 0.1})`);
   ctx.fill();
 
   ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.arc(x, y, radius, 0, TAU);
   ctx.fillStyle = color;
   ctx.fill();
+}
+
+function drawShellGuides(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  shellCount: number,
+  timeMs: number
+): void {
+  const { cx, cy, halfW, halfH } = layoutMetrics(width, height);
+  const hue = PALETTE_HUES[Math.floor((timeMs * 0.00001) % PALETTE_HUES.length)];
+
+  for (let i = 0; i < shellCount; i += 1) {
+    const radius = SHELL_RADII[i % SHELL_RADII.length];
+    ctx.beginPath();
+    ctx.ellipse(
+      cx,
+      cy,
+      halfW * radius,
+      halfH * radius * 0.78,
+      0,
+      0,
+      TAU
+    );
+    ctx.strokeStyle = `hsla(${hue}, 55%, 55%, 0.07)`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 }
 
 export function updateParticles(
@@ -337,66 +447,19 @@ export function updateParticles(
   timeMs: number,
   reducedMotion: boolean
 ): void {
-  const cx = width / 2;
-  const cy = height / 2;
-  const scale = Math.min(width, height);
-  const halfW = width * 0.5;
-  const halfH = height * 0.5;
-  const padX = Math.max(8, width * 0.04);
-  const padY = Math.max(8, height * 0.04);
-  const motion = reducedMotion ? 0.12 : 1;
-  const t = timeMs * 0.001;
+  const motion = reducedMotion ? 0.15 : 1;
 
   for (const particle of particles) {
-    particle.angle += particle.orbitSpeed * delta * motion;
-
-    const rx = (halfW - padX) * particle.orbitRxFactor;
-    const ry = (halfH - padY) * particle.orbitRyFactor;
-    const epRx = (halfW - padX) * particle.epicycleRxFactor;
-    const epRy = (halfH - padY) * particle.epicycleRyFactor;
-
-    const orbitX =
-      cx + Math.cos(particle.angle + particle.seed * 6.28) * rx;
-    const orbitY =
-      cy +
-      Math.sin(particle.angle * 0.83 + particle.seed * 4.17) * ry;
-
-    const epX =
-      Math.cos(t * particle.epicycleSpeed + particle.seed * 9.1) * epRx;
-    const epY =
-      Math.sin(t * particle.epicycleSpeed * 1.27 + particle.seed * 5.3) * epRy;
-
-    let x = orbitX + epX;
-    let y = orbitY + epY;
-
-    for (const other of particles) {
-      if (other === particle) {
-        continue;
-      }
-      const dx = x - other.x;
-      const dy = y - other.y;
-      const dist = Math.hypot(dx, dy);
-      const minDist = scale * 0.11;
-      if (dist > 0.5 && dist < minDist) {
-        const push = ((minDist - dist) / minDist) * scale * 0.018 * motion;
-        x += (dx / dist) * push;
-        y += (dy / dist) * push;
-      }
-    }
-
-    const clampX = halfW - padX;
-    const clampY = halfH - padY;
-    x = Math.min(cx + clampX, Math.max(cx - clampX, x));
-    y = Math.min(cy + clampY, Math.max(cy - clampY, y));
-
-    particle.x = x;
-    particle.y = y;
+    particle.phase += particle.orbitSpeed * delta * motion;
+    placeParticle(particle, width, height, timeMs);
 
     if (particle.flash > 0) {
       particle.flash = Math.max(0, particle.flash - delta * 0.0045);
     }
 
-    pushTrail(particle);
+    if (particle.placed) {
+      pushTrail(particle);
+    }
   }
 }
 
@@ -407,18 +470,15 @@ export function drawReactor(
   height: number,
   timeMs: number
 ): void {
-  const cx = width / 2;
-  const cy = height / 2;
-  const scale = Math.min(width, height);
+  const { cx, cy, scale } = layoutMetrics(width, height);
+  const shellCount = Math.min(
+    SHELL_RADII.length,
+    Math.max(2, Math.ceil(Math.sqrt(Math.max(1, particles.length))))
+  );
 
   ctx.clearRect(0, 0, width, height);
 
-  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.72);
-  bg.addColorStop(0, "hsla(200, 70%, 58%, 0.06)");
-  bg.addColorStop(0.35, "hsla(260, 55%, 42%, 0.03)");
-  bg.addColorStop(1, "hsla(0, 0%, 0%, 0)");
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, width, height);
+  drawShellGuides(ctx, width, height, shellCount, timeMs);
 
   for (const particle of particles) {
     drawTrail(ctx, particle, timeMs);
@@ -427,12 +487,12 @@ export function drawReactor(
   for (const particle of particles) {
     const baseRadius =
       particle.kind === "binary"
-        ? scale * 0.028
+        ? scale * 0.022
         : particle.kind === "numeric"
-          ? scale * 0.014 + particle.numericNorm * scale * 0.008
-          : scale * 0.016;
+          ? scale * 0.011 + particle.numericNorm * scale * 0.007
+          : scale * 0.013;
 
-    let alpha = particle.unavailable ? 0.28 : 0.72;
+    let alpha = particle.unavailable ? 0.28 : 0.78;
     if (particle.kind === "binary") {
       const pulse = particle.binaryOn
         ? 0.55 + Math.sin(timeMs * 0.012 + particle.seed * 12) * 0.35
@@ -451,9 +511,15 @@ export function drawReactor(
     ctx,
     cx,
     cy,
-    scale * 0.014 * corePulse,
-    `hsla(${coreHue}, 88%, 68%, 0.7)`,
-    0.55,
-    0.35
+    scale * 0.012 * corePulse,
+    `hsla(${coreHue}, 88%, 68%, 0.65)`,
+    0.5,
+    0.3
   );
+}
+
+export function clearParticleTrails(particles: ReactorParticle[]): void {
+  for (const particle of particles) {
+    particle.trail = [];
+  }
 }

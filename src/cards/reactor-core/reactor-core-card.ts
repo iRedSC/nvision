@@ -22,6 +22,7 @@ import {
   REACTOR_CORE_CARD_NAME,
 } from "./const";
 import {
+  clearParticleTrails,
   drawReactor,
   syncParticles,
   updateParticles,
@@ -86,6 +87,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: ReactorCoreCardConfig;
 
+  @query(".stage") private _stage?: HTMLElement;
+
   @query("canvas") private _canvas?: HTMLCanvasElement;
 
   private _ctx?: CanvasRenderingContext2D;
@@ -111,6 +114,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       ...moreInfoInteractions(),
       ...config,
     };
+    this._entityKey = "";
+    clearParticleTrails(this._particles);
   }
 
   public getCardSize(): number {
@@ -123,15 +128,14 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   connectedCallback(): void {
     super.connectedCallback();
-    if (this._ctx) {
-      this._lastFrame = 0;
-      this._startAnimation();
-    }
+    this._lastFrame = 0;
+    this._startAnimation();
   }
 
   disconnectedCallback(): void {
     this._stopAnimation();
     this._resizeObserver?.disconnect();
+    this._resizeObserver = undefined;
     super.disconnectedCallback();
   }
 
@@ -143,13 +147,21 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     this._ensureCanvas();
   }
 
-  private _syncParticles(): void {
+  private _canvasSize(): { width: number; height: number } {
+    const canvas = this._canvas;
+    if (!canvas) {
+      return { width: 0, height: 0 };
+    }
+    return { width: canvas.clientWidth, height: canvas.clientHeight };
+  }
+
+  private _syncParticles(timeMs = performance.now()): void {
     if (!this.hass || !this._config) {
       return;
     }
 
-    const canvas = this._canvas;
-    const entityIds = this._discoverIds();
+    const { width, height } = this._canvasSize();
+    const entityIds = discoverIds(this.hass, this._config);
     const key = entityIds.join("|");
     const configKey = [
       this._config.mode,
@@ -159,62 +171,56 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       this._config.min,
       this._config.max,
       (this._config.entities ?? []).join(","),
+      width,
+      height,
     ].join(";");
 
-    if (key + configKey === this._entityKey && this._particles.length) {
-      this._particles = syncParticles(this._particles, this.hass, this._config);
-      return;
+    if (key + configKey !== this._entityKey) {
+      clearParticleTrails(this._particles);
+      this._entityKey = key + configKey;
     }
 
-    this._entityKey = key + configKey;
-    this._particles = syncParticles(this._particles, this.hass, this._config);
-  }
-
-  private _discoverIds(): string[] {
-    if (!this.hass || !this._config) {
-      return [];
-    }
-
-    const mode = this._config.mode ?? DEFAULT_MODE;
-    if (mode === "manual" && this._config.entities?.length) {
-      return this._config.entities.filter((id) => Boolean(this.hass?.states[id]));
-    }
-
-    const domains = this._config.domains?.length
-      ? this._config.domains
-      : ["sensor", "binary_sensor"];
-    const max = this._config.max_particles ?? DEFAULT_MAX_PARTICLES;
-
-    return Object.keys(this.hass.states)
-      .filter((id) => domains.includes(id.split(".", 1)[0]))
-      .sort((a, b) => a.localeCompare(b))
-      .slice(0, max);
+    this._particles = syncParticles(
+      this._particles,
+      this.hass,
+      this._config,
+      width,
+      height,
+      timeMs
+    );
   }
 
   private _ensureCanvas(): void {
     const canvas = this._canvas;
-    if (!canvas || this._ctx) {
+    if (!canvas) {
       return;
     }
 
-    this._ctx = canvas.getContext("2d") ?? undefined;
     if (!this._ctx) {
-      return;
+      this._ctx = canvas.getContext("2d") ?? undefined;
+      if (!this._ctx) {
+        return;
+      }
+
+      this._resizeObserver = new ResizeObserver(() => {
+        this._resizeCanvas();
+        clearParticleTrails(this._particles);
+        this._syncParticles();
+      });
+      this._resizeObserver.observe(this._stage ?? canvas.parentElement ?? this);
     }
 
-    this._resizeObserver = new ResizeObserver(() => {
-      this._resizeCanvas();
-      this._syncParticles();
-    });
-    this._resizeObserver.observe(canvas.parentElement ?? this);
     this._resizeCanvas();
     this._syncParticles();
-    this._lastFrame = 0;
-    this._startAnimation();
+
+    if (!this._animating) {
+      this._lastFrame = 0;
+      this._startAnimation();
+    }
   }
 
   private _startAnimation(): void {
-    if (this._animating) {
+    if (this._animating || !this._ctx) {
       return;
     }
 
@@ -269,7 +275,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     if (!this._particles.length) {
-      this._syncParticles();
+      this._syncParticles(timeMs);
     }
 
     const reducedMotion = prefersReducedMotion();
@@ -290,7 +296,9 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     const title = this._config.name || "Reactor Core";
-    const count = this._particles.length || this._discoverIds().length;
+    const count =
+      this._particles.length ||
+      discoverIds(this.hass, this._config).length;
 
     return html`
       <ha-card>
@@ -332,8 +340,9 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
       .stage {
         position: relative;
+        width: 100%;
         height: 100%;
-        min-height: 120px;
+        min-height: 160px;
         overflow: hidden;
       }
 
@@ -378,6 +387,26 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       }
     `,
   ];
+}
+
+function discoverIds(
+  hass: HomeAssistant,
+  config: ReactorCoreCardConfig
+): string[] {
+  const mode = config.mode ?? DEFAULT_MODE;
+  if (mode === "manual" && config.entities?.length) {
+    return config.entities.filter((id) => Boolean(hass.states[id]));
+  }
+
+  const domains = config.domains?.length
+    ? config.domains
+    : ["sensor", "binary_sensor"];
+  const max = config.max_particles ?? DEFAULT_MAX_PARTICLES;
+
+  return Object.keys(hass.states)
+    .filter((id) => domains.includes(id.split(".", 1)[0]))
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, max);
 }
 
 declare global {
