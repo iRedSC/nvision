@@ -193,7 +193,7 @@ function drawAmbientHeatGlow(
 ): void {
   const heat = smoothstep(tempNorm);
   const critical = criticalLevel(tempNorm);
-  const intensity = heat * 0.5 + critical * 0.72;
+  const intensity = 0.1 + heat * 0.48 + critical * 0.82;
   const rgb = heatGlowColor(tempNorm, phase);
   const pulse = 1 + Math.sin(phase * 3.8) * critical * 0.08;
   const coreRadius = radius * breathe * pulse;
@@ -202,18 +202,19 @@ function drawAmbientHeatGlow(
   ctx.globalCompositeOperation = "lighter";
 
   const layers: Array<{ scale: number; alpha: number }> = [
-    { scale: 2.65, alpha: 0.028 * intensity },
-    { scale: 1.85, alpha: 0.055 * intensity },
-    { scale: 1.28, alpha: 0.095 * intensity },
+    { scale: 3.05, alpha: 0.034 * intensity },
+    { scale: 2.15, alpha: 0.062 * intensity },
+    { scale: 1.48, alpha: 0.098 * intensity },
+    { scale: 1.06, alpha: 0.13 * intensity },
   ];
 
   for (const layer of layers) {
     const spread = coreRadius * layer.scale;
     const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, spread);
 
-    gradient.addColorStop(0, rgba(rgb, layer.alpha * 1.15));
-    gradient.addColorStop(0.38, rgba(rgb, layer.alpha * 0.55));
-    gradient.addColorStop(0.72, rgba(mixRgb(rgb, [40, 0, 0], 0.25), layer.alpha * 0.16));
+    gradient.addColorStop(0, rgba(rgb, layer.alpha * 1.12));
+    gradient.addColorStop(0.34, rgba(rgb, layer.alpha * 0.52));
+    gradient.addColorStop(0.68, rgba(mixRgb(rgb, [40, 0, 0], 0.25), layer.alpha * 0.15));
     gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
 
     ctx.fillStyle = gradient;
@@ -225,29 +226,22 @@ function drawAmbientHeatGlow(
   ctx.restore();
 }
 
+function orbSizeScale(
+  heat: number,
+  seed: number
+): number {
+  const variation = fract(seed * 1.27) * 0.16;
+  return 0.52 + variation + heat * 0.045;
+}
+
 function drawPlasmaBlob(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   radius: number,
   rgb: [number, number, number],
-  alpha: number,
-  glow = 0
+  alpha: number
 ): void {
-  if (glow > 0.01) {
-    const haloRadius = radius * (1.55 + glow * 0.95);
-    const halo = ctx.createRadialGradient(x, y, radius * 0.15, x, y, haloRadius);
-
-    halo.addColorStop(0, rgba(rgb, glow * 0.2));
-    halo.addColorStop(0.42, rgba(rgb, glow * 0.09));
-    halo.addColorStop(1, "rgba(0, 0, 0, 0)");
-
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(x, y, haloRadius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   const core = mixRgb(rgb, [255, 92, 38], 0.18);
   const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
 
@@ -446,7 +440,7 @@ function drawCore(
   const churn = baseRadius * (0.035 + critical * 0.055);
   const breathe = 1 + Math.sin(phase * 2.3) * (0.018 + critical * 0.035);
   const clipWrithe = ringWrithe * (0.55 + (1 - critical) * 0.25);
-  const glow = heat * 0.42 + critical * 0.68;
+  const heatRadiance = heat * 0.42 + critical * 0.68;
 
   drawAmbientHeatGlow(
     ctx,
@@ -464,7 +458,7 @@ function drawCore(
     ctx,
     cx,
     cy,
-    baseRadius * breathe * 1.1,
+    baseRadius * breathe * 1.08,
     phase,
     clipWrithe
   );
@@ -474,10 +468,9 @@ function drawCore(
     ctx,
     cx + Math.sin(phase * 1.4) * churn * 0.35,
     cy + Math.cos(phase * 1.2) * churn * 0.35,
-    baseRadius * (0.7 + heat * 0.14),
+    baseRadius * (0.64 + heat * 0.05),
     orbColor(tempNorm, 0, phase),
-    0.15 + heat * 0.14,
-    glow * 1.15
+    0.15 + heat * 0.14
   );
 
   for (let index = 0; index < ORB_COUNT; index++) {
@@ -494,25 +487,16 @@ function drawCore(
       cy +
       Math.sin(angle * 1.07) * orbitRadius +
       Math.sin(angle * 1.85 + phase * 1.1) * churn;
-    const blobRadius =
-      baseRadius * (0.5 + fract(seed * 1.27) * 0.24 + heat * 0.08);
+    const blobRadius = baseRadius * orbSizeScale(heat, seed);
     const alpha = 0.11 + heat * 0.1 + fract(seed) * 0.04;
     const orbRgb = orbColor(tempNorm, index + 1, phase);
 
-    drawPlasmaBlob(
-      ctx,
-      x,
-      y,
-      blobRadius,
-      orbRgb,
-      alpha,
-      glow * (0.72 + fract(seed) * 0.28)
-    );
+    drawPlasmaBlob(ctx, x, y, blobRadius, orbRgb, alpha);
   }
 
   ctx.restore();
 
-  if (glow > 0.25) {
+  if (heatRadiance > 0.2) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     traceWrithingPath(
@@ -523,7 +507,10 @@ function drawCore(
       phase,
       ringWrithe * 0.75
     );
-    ctx.fillStyle = rgba(heatGlowColor(tempNorm, phase), 0.018 + glow * 0.04);
+    ctx.fillStyle = rgba(
+      heatGlowColor(tempNorm, phase),
+      0.02 + heatRadiance * 0.045
+    );
     ctx.fill();
     ctx.restore();
   }

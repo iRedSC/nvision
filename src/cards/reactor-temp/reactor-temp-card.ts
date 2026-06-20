@@ -510,7 +510,8 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
       }
 
       .content {
-        position: relative;
+        position: absolute;
+        inset: auto 0 0 0;
         z-index: 1;
         display: flex;
         align-items: center;
