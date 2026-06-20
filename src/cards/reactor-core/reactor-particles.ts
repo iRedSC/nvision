@@ -16,6 +16,14 @@ export type ParticleKind = "binary" | "numeric" | "other";
 
 /** Normalized radii for concentric orbital shells (fraction of usable half-axis). */
 const SHELL_RADII = [0.42, 0.58, 0.72, 0.84];
+const PULSE_LIFE_MS = 1400;
+
+export interface ReactorPulse {
+  x: number;
+  y: number;
+  age: number;
+  seed: number;
+}
 
 export interface ReactorParticle {
   entityId: string;
@@ -24,21 +32,15 @@ export interface ReactorParticle {
   seedY: number;
   x: number;
   y: number;
-  /** Accumulated orbit phase (radians). */
   phase: number;
   shell: number;
   slot: number;
   slotsOnShell: number;
-  /** Ellipse plane rotation (radians). */
   orbitTilt: number;
-  /** Vertical squash for tilted ellipses. */
   orbitRyScale: number;
   orbitSpeed: number;
   wobbleSpeed: number;
-  trail: { x: number; y: number }[];
-  trailCapacity: number;
   binaryOn: boolean;
-  flash: number;
   lastState?: string;
   numericNorm: number;
   unavailable: boolean;
@@ -120,16 +122,6 @@ function numericNormForEntity(
   return normalizeValue(value, min, max);
 }
 
-function trailCapacityFor(kind: ParticleKind, numericNorm: number): number {
-  if (kind === "binary") {
-    return 0;
-  }
-  if (kind === "numeric") {
-    return Math.round(4 + numericNorm * 12);
-  }
-  return 8;
-}
-
 function shellLayout(
   index: number,
   count: number
@@ -142,6 +134,24 @@ function shellLayout(
   const slotsOnShell = Math.ceil(count / shellCount);
   const slot = Math.floor(index / shellCount) % slotsOnShell;
   return { shell, slot, slotsOnShell };
+}
+
+function pulseHue(seed: number, timeMs: number): number {
+  const cycle =
+    (timeMs * 0.000014 + seed * 0.31) % PALETTE_HUES.length;
+  const idx = Math.floor(cycle);
+  const next = (idx + 1) % PALETTE_HUES.length;
+  const blend = cycle - idx;
+  return PALETTE_HUES[idx] + (PALETTE_HUES[next] - PALETTE_HUES[idx]) * blend;
+}
+
+export function spawnPulse(particle: ReactorParticle, pulses: ReactorPulse[]): void {
+  pulses.push({
+    x: particle.x,
+    y: particle.y,
+    age: 0,
+    seed: particle.seed,
+  });
 }
 
 export function discoverEntityIds(
@@ -204,10 +214,7 @@ function createParticle(
     orbitRyScale: 0.62 + seedY * 0.32,
     orbitSpeed: direction * (0.00055 + seed * 0.00075),
     wobbleSpeed: 0.0016 + seedY * 0.0024,
-    trail: [],
-    trailCapacity: trailCapacityFor(kind, numericNorm),
     binaryOn: isBinaryOn(hass, entityId),
-    flash: 0,
     lastState: state,
     numericNorm,
     unavailable: state === "unavailable" || state === "unknown",
@@ -218,21 +225,32 @@ function createParticle(
 function layoutMetrics(
   width: number,
   height: number
-): { cx: number; cy: number; halfW: number; halfH: number; scale: number } {
+): {
+  cx: number;
+  cy: number;
+  halfW: number;
+  halfH: number;
+  scale: number;
+  clampX: number;
+  clampY: number;
+} {
   const cx = width / 2;
   const cy = height / 2;
   const padX = Math.max(10, width * 0.06);
   const padY = Math.max(10, height * 0.06);
+  const halfW = Math.max(1, width / 2 - padX);
+  const halfH = Math.max(1, height / 2 - padY);
   return {
     cx,
     cy,
-    halfW: Math.max(1, width / 2 - padX),
-    halfH: Math.max(1, height / 2 - padY),
+    halfW,
+    halfH,
     scale: Math.min(width, height),
+    clampX: halfW,
+    clampY: halfH,
   };
 }
 
-/** Deterministic position on a tilted elliptical shell. */
 export function placeParticle(
   particle: ReactorParticle,
   width: number,
@@ -268,6 +286,7 @@ export function syncParticles(
   particles: ReactorParticle[],
   hass: HomeAssistant,
   config: ReactorCoreCardConfig,
+  pulses: ReactorPulse[],
   width = 0,
   height = 0,
   timeMs = 0
@@ -292,27 +311,21 @@ export function syncParticles(
       existing.slot = layout.slot;
       existing.slotsOnShell = layout.slotsOnShell;
 
-      if (
-        existing.lastState !== undefined &&
-        state !== existing.lastState
-      ) {
-        existing.flash = 1;
+      if (width > 0 && height > 0) {
+        placeParticle(existing, width, height, timeMs);
+      }
+
+      if (existing.lastState !== undefined && state !== existing.lastState) {
+        spawnPulse(existing, pulses);
       }
       existing.lastState = state;
       existing.kind = kind;
       existing.numericNorm = numericNorm;
       existing.binaryOn = binaryOn;
-      existing.trailCapacity = trailCapacityFor(kind, numericNorm);
       existing.unavailable =
         hass.states[entityId]?.state === "unavailable" ||
         hass.states[entityId]?.state === "unknown";
-      if (existing.trail.length > existing.trailCapacity) {
-        existing.trail = existing.trail.slice(-existing.trailCapacity);
-      }
 
-      if (width > 0 && height > 0) {
-        placeParticle(existing, width, height, timeMs);
-      }
       next.push(existing);
       continue;
     }
@@ -339,13 +352,7 @@ function particleColor(
   timeMs: number,
   alpha: number
 ): string {
-  const cycle =
-    (timeMs * 0.000014 + particle.seed * 0.31) % PALETTE_HUES.length;
-  const idx = Math.floor(cycle);
-  const next = (idx + 1) % PALETTE_HUES.length;
-  const blend = cycle - idx;
-  const hue =
-    PALETTE_HUES[idx] + (PALETTE_HUES[next] - PALETTE_HUES[idx]) * blend;
+  const hue = pulseHue(particle.seed, timeMs);
 
   let sat = 82;
   let light = 58;
@@ -358,44 +365,6 @@ function particleColor(
   }
 
   return `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
-}
-
-function pushTrail(particle: ReactorParticle): void {
-  if (particle.trailCapacity <= 0) {
-    particle.trail = [];
-    return;
-  }
-
-  const last = particle.trail[particle.trail.length - 1];
-  if (last && Math.hypot(particle.x - last.x, particle.y - last.y) < 2.5) {
-    return;
-  }
-
-  particle.trail.push({ x: particle.x, y: particle.y });
-  if (particle.trail.length > particle.trailCapacity) {
-    particle.trail.shift();
-  }
-}
-
-function drawTrail(
-  ctx: CanvasRenderingContext2D,
-  particle: ReactorParticle,
-  timeMs: number
-): void {
-  const trail = particle.trail;
-  if (trail.length < 2) {
-    return;
-  }
-
-  for (let i = 1; i < trail.length; i += 1) {
-    const t = i / trail.length;
-    ctx.beginPath();
-    ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
-    ctx.lineTo(trail[i].x, trail[i].y);
-    ctx.strokeStyle = particleColor(particle, timeMs, 0.06 + t * 0.34);
-    ctx.lineWidth = 0.8 + t * 1.6;
-    ctx.stroke();
-  }
 }
 
 function drawGlowDot(
@@ -418,31 +387,47 @@ function drawGlowDot(
   ctx.fill();
 }
 
-function drawShellGuides(
-  ctx: CanvasRenderingContext2D,
+function applyRepulsion(
+  particles: ReactorParticle[],
   width: number,
   height: number,
-  shellCount: number,
-  timeMs: number
+  motion: number
 ): void {
-  const { cx, cy, halfW, halfH } = layoutMetrics(width, height);
-  const hue = PALETTE_HUES[Math.floor((timeMs * 0.00001) % PALETTE_HUES.length)];
+  const { cx, cy, scale, clampX, clampY } = layoutMetrics(width, height);
+  const minDist = scale * 0.11;
 
-  for (let i = 0; i < shellCount; i += 1) {
-    const radius = SHELL_RADII[i % SHELL_RADII.length];
-    ctx.beginPath();
-    ctx.ellipse(
-      cx,
-      cy,
-      halfW * radius,
-      halfH * radius * 0.78,
-      0,
-      0,
-      TAU
-    );
-    ctx.strokeStyle = `hsla(${hue}, 55%, 55%, 0.07)`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
+  for (const particle of particles) {
+    let x = particle.x;
+    let y = particle.y;
+
+    for (const other of particles) {
+      if (other === particle) {
+        continue;
+      }
+      const dx = x - other.x;
+      const dy = y - other.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 0.5 && dist < minDist) {
+        const push = ((minDist - dist) / minDist) * scale * 0.018 * motion;
+        x += (dx / dist) * push;
+        y += (dy / dist) * push;
+      }
+    }
+
+    particle.x = Math.min(cx + clampX, Math.max(cx - clampX, x));
+    particle.y = Math.min(cy + clampY, Math.max(cy - clampY, y));
+  }
+}
+
+export function updatePulses(
+  pulses: ReactorPulse[],
+  deltaMs: number
+): void {
+  for (let i = pulses.length - 1; i >= 0; i -= 1) {
+    pulses[i].age += deltaMs;
+    if (pulses[i].age >= PULSE_LIFE_MS) {
+      pulses.splice(i, 1);
+    }
   }
 }
 
@@ -459,56 +444,66 @@ export function updateParticles(
   for (const particle of particles) {
     particle.phase += particle.orbitSpeed * delta * motion;
     placeParticle(particle, width, height, timeMs);
+  }
 
-    if (particle.flash > 0) {
-      particle.flash = Math.max(0, particle.flash - delta * 0.0045);
-    }
+  applyRepulsion(particles, width, height, motion);
+}
 
-    if (particle.placed) {
-      pushTrail(particle);
-    }
+export function drawPulses(
+  ctx: CanvasRenderingContext2D,
+  pulses: ReactorPulse[],
+  scale: number,
+  timeMs: number
+): void {
+  for (const pulse of pulses) {
+    const t = pulse.age / PULSE_LIFE_MS;
+    const radius = scale * (0.022 + t * 0.42);
+    const alpha = (1 - t) * 0.52;
+    const hue = pulseHue(pulse.seed, timeMs);
+
+    ctx.beginPath();
+    ctx.arc(pulse.x, pulse.y, radius, 0, TAU);
+    ctx.strokeStyle = `hsla(${hue}, 88%, 64%, ${alpha})`;
+    ctx.lineWidth = 1.2 + (1 - t) * 2.2;
+    ctx.stroke();
   }
 }
 
 export function drawReactor(
   ctx: CanvasRenderingContext2D,
   particles: ReactorParticle[],
+  pulses: ReactorPulse[],
   width: number,
   height: number,
   timeMs: number
 ): void {
   const { cx, cy, scale } = layoutMetrics(width, height);
-  const shellCount = Math.min(
-    SHELL_RADII.length,
-    Math.max(2, Math.ceil(Math.sqrt(Math.max(1, particles.length))))
-  );
 
   ctx.clearRect(0, 0, width, height);
 
-  drawShellGuides(ctx, width, height, shellCount, timeMs);
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.72);
+  bg.addColorStop(0, "hsla(200, 70%, 58%, 0.06)");
+  bg.addColorStop(0.35, "hsla(260, 55%, 42%, 0.03)");
+  bg.addColorStop(1, "hsla(0, 0%, 0%, 0)");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+
+  drawPulses(ctx, pulses, scale, timeMs);
 
   for (const particle of particles) {
-    drawTrail(ctx, particle, timeMs);
-  }
-
-  for (const particle of particles) {
-    const flashBoost = particle.flash;
     const baseRadius =
-      (particle.kind === "binary"
+      particle.kind === "binary"
         ? scale * 0.022
         : particle.kind === "numeric"
           ? scale * 0.011 + particle.numericNorm * scale * 0.007
-          : scale * 0.013) *
-      (1 + flashBoost * 0.45);
+          : scale * 0.013;
 
     let alpha = particle.unavailable ? 0.28 : 0.78;
     if (particle.kind === "binary") {
-      const pulse = particle.binaryOn
+      alpha = particle.binaryOn
         ? 0.55 + Math.sin(timeMs * 0.012 + particle.seed * 12) * 0.35
         : 0.35;
-      alpha = pulse;
     }
-    alpha = Math.min(1, alpha + flashBoost * 0.55);
 
     const color = particleColor(particle, timeMs, alpha);
     drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha);
@@ -526,10 +521,4 @@ export function drawReactor(
     0.5,
     0.3
   );
-}
-
-export function clearParticleTrails(particles: ReactorParticle[]): void {
-  for (const particle of particles) {
-    particle.trail = [];
-  }
 }

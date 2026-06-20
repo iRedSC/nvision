@@ -22,17 +22,18 @@ import {
   REACTOR_CORE_CARD_NAME,
 } from "./const";
 import {
-  clearParticleTrails,
   drawReactor,
   syncParticles,
   updateParticles,
+  updatePulses,
   type ReactorParticle,
+  type ReactorPulse,
 } from "./reactor-particles";
 
 registerCustomCard({
   type: REACTOR_CORE_CARD_NAME,
   name: "Nvision Reactor Core",
-  description: "Orbiting sensor particles with reactor-style glow trails",
+  description: "Orbiting sensor particles with reactor-style pulse effects",
 });
 
 function prefersReducedMotion(): boolean {
@@ -96,6 +97,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
   private _animating = false;
   private _lastFrame = 0;
   private _particles: ReactorParticle[] = [];
+  private _pulses: ReactorPulse[] = [];
   private _entityKey = "";
   private _resizeObserver?: ResizeObserver;
 
@@ -115,7 +117,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       ...config,
     };
     this._entityKey = "";
-    clearParticleTrails(this._particles);
+    this._pulses = [];
   }
 
   public getCardSize(): number {
@@ -176,7 +178,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     ].join(";");
 
     if (key + configKey !== this._entityKey) {
-      clearParticleTrails(this._particles);
+      this._pulses = [];
       this._entityKey = key + configKey;
     }
 
@@ -184,6 +186,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       this._particles,
       this.hass,
       this._config,
+      this._pulses,
       width,
       height,
       timeMs
@@ -204,7 +207,6 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
       this._resizeObserver = new ResizeObserver(() => {
         this._resizeCanvas();
-        clearParticleTrails(this._particles);
         this._syncParticles();
       });
       this._resizeObserver.observe(this._stage ?? canvas.parentElement ?? this);
@@ -235,8 +237,9 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       const delta = this._lastFrame
         ? Math.min((now - this._lastFrame) / 16.67, 3)
         : 1;
+      const deltaMs = this._lastFrame ? now - this._lastFrame : 16.67;
       this._lastFrame = now;
-      this._draw(delta, now);
+      this._draw(delta, deltaMs, now);
       this._frameId = requestAnimationFrame(tick);
     };
 
@@ -261,7 +264,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     this._ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  private _draw(delta: number, timeMs: number): void {
+  private _draw(delta: number, deltaMs: number, timeMs: number): void {
     const canvas = this._canvas;
     const ctx = this._ctx;
     if (!canvas || !ctx || !this.hass || !this._config) {
@@ -287,7 +290,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       timeMs,
       reducedMotion
     );
-    drawReactor(ctx, this._particles, width, height, timeMs);
+    updatePulses(this._pulses, deltaMs);
+    drawReactor(ctx, this._particles, this._pulses, width, height, timeMs);
   }
 
   protected render() {
