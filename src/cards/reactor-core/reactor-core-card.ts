@@ -29,7 +29,6 @@ import {
 } from "./const";
 import {
   drawReactor,
-  nearestParticles,
   syncParticles,
   updateParticles,
   updatePulses,
@@ -37,6 +36,8 @@ import {
   type ReactorParticle,
   type ReactorPulse,
 } from "./reactor-particles";
+
+const INFO_SLOT_COUNT = 4;
 
 registerCustomCard({
   type: REACTOR_CORE_CARD_NAME,
@@ -102,7 +103,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: ReactorCoreCardConfig;
 
-  @state() private _nearestIds: string[] = ["", "", "", ""];
+  @state() private _slotIds: string[] = Array(INFO_SLOT_COUNT).fill("");
 
   @query(".stage") private _stage?: HTMLElement;
 
@@ -116,8 +117,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
   private _pulses: ReactorPulse[] = [];
   private _entityKey = "";
   private _resizeObserver?: ResizeObserver;
-  private _cursorX = 0;
-  private _cursorY = 0;
+  private _slotAge = Array(INFO_SLOT_COUNT).fill(0);
 
   private _actions = new ActionHandlers(
     () => this,
@@ -136,6 +136,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     };
     this._entityKey = "";
     this._pulses = [];
+    this._resetSlots();
   }
 
   public getCardSize(): number {
@@ -150,10 +151,6 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     super.connectedCallback();
     this._lastFrame = 0;
     this._startAnimation();
-  }
-
-  firstUpdated(): void {
-    this._resetCursorToCenter();
   }
 
   disconnectedCallback(): void {
@@ -200,9 +197,10 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     if (key + configKey !== this._entityKey) {
       this._pulses = [];
       this._entityKey = key + configKey;
+      this._resetSlots();
     }
 
-    this._particles = syncParticles(
+    const { particles, changedIds } = syncParticles(
       this._particles,
       this.hass,
       this._config,
@@ -211,49 +209,40 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       height,
       timeMs
     );
-    this._updateNearest();
-  }
+    this._particles = particles;
 
-  private _resetCursorToCenter(): void {
-    const { width, height } = this._canvasSize();
-    this._cursorX = width / 2;
-    this._cursorY = height / 2;
-    this._updateNearest();
-  }
-
-  private _updateNearest(): void {
-    const nearest = nearestParticles(
-      this._particles,
-      this._cursorX,
-      this._cursorY,
-      4
-    );
-    const ids = nearest.map((particle) => particle.entityId);
-    while (ids.length < 4) {
-      ids.push("");
-    }
-
-    const key = ids.join("|");
-    if (key !== this._nearestIds.join("|")) {
-      this._nearestIds = ids;
+    for (const entityId of changedIds) {
+      this._assignToOldestSlot(entityId);
     }
   }
 
-  private _onPointerMove = (event: PointerEvent): void => {
-    const stage = this._stage;
-    if (!stage) {
-      return;
+  private _resetSlots(): void {
+    this._slotIds = Array(INFO_SLOT_COUNT).fill("");
+    this._slotAge = Array(INFO_SLOT_COUNT).fill(0);
+  }
+
+  private _assignToOldestSlot(entityId: string): void {
+    const slots = [...this._slotIds];
+    const ages = [...this._slotAge];
+
+    for (let index = 0; index < INFO_SLOT_COUNT; index += 1) {
+      if (slots[index] === entityId) {
+        slots[index] = "";
+      }
     }
 
-    const rect = stage.getBoundingClientRect();
-    this._cursorX = event.clientX - rect.left;
-    this._cursorY = event.clientY - rect.top;
-    this._updateNearest();
-  };
+    let oldestIndex = 0;
+    for (let index = 1; index < INFO_SLOT_COUNT; index += 1) {
+      if (ages[index] < ages[oldestIndex]) {
+        oldestIndex = index;
+      }
+    }
 
-  private _onPointerLeave = (): void => {
-    this._resetCursorToCenter();
-  };
+    slots[oldestIndex] = entityId;
+    ages[oldestIndex] = performance.now();
+    this._slotIds = slots;
+    this._slotAge = ages;
+  }
 
   private _infoAnchors(): { x: number; y: number }[] {
     const stage = this._stage;
@@ -277,8 +266,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     const anchors = this._infoAnchors();
     const connections: ReactorConnection[] = [];
 
-    for (let index = 0; index < 4; index += 1) {
-      const entityId = this._nearestIds[index];
+    for (let index = 0; index < INFO_SLOT_COUNT; index += 1) {
+      const entityId = this._slotIds[index];
       if (!entityId) {
         continue;
       }
@@ -434,19 +423,18 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
             @keydown=${this._actions.bind().keydown}
             @pointerdown=${this._actions.bind().pointerdown}
             @pointerup=${this._actions.bind().pointerup}
-            @pointerleave=${this._onPointerLeave}
+            @pointerleave=${this._actions.bind().pointerleave}
             @pointercancel=${this._actions.bind().pointercancel}
-            @pointermove=${this._onPointerMove}
           >
             <div class="info-bar">
-              ${this._nearestIds.map((entityId, index) => {
+              ${this._slotIds.map((entityId, index) => {
                 const stateObj = entityId
                   ? this.hass.states[entityId]
                   : undefined;
 
                 return html`
                   <div
-                    class="info-slot ${entityId ? "active" : ""}"
+                    class="info-slot"
                     data-slot=${index}
                     @click=${(event: Event) => event.stopPropagation()}
                   >
@@ -515,12 +503,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
         justify-content: flex-end;
         padding: 8px 6px;
         box-sizing: border-box;
-        cursor: crosshair;
-        background: linear-gradient(
-          to top,
-          rgba(0, 0, 0, 0.34),
-          rgba(0, 0, 0, 0)
-        );
+        cursor: pointer;
       }
 
       .info-bar {
@@ -539,14 +522,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
         min-width: 0;
         min-height: 52px;
         padding: 6px 4px;
-        border-radius: 10px;
-        background: rgba(0, 0, 0, 0.28);
         text-align: center;
-        pointer-events: none;
-      }
-
-      .info-slot.active {
-        background: rgba(0, 0, 0, 0.42);
       }
 
       .info-slot ha-state-icon {

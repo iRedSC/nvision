@@ -319,12 +319,13 @@ export function syncParticles(
   width = 0,
   height = 0,
   timeMs = 0
-): ReactorParticle[] {
+): { particles: ReactorParticle[]; changedIds: string[] } {
   const min = config.min ?? DEFAULT_MIN;
   const max = config.max ?? DEFAULT_MAX;
   const entityIds = discoverEntityIds(hass, config);
   const byId = new Map(particles.map((particle) => [particle.entityId, particle]));
   const next: ReactorParticle[] = [];
+  const changedIds: string[] = [];
 
   for (let index = 0; index < entityIds.length; index += 1) {
     const entityId = entityIds[index];
@@ -339,6 +340,7 @@ export function syncParticles(
 
       if (existing.lastState !== undefined && state !== existing.lastState) {
         spawnPulse(existing, pulses);
+        changedIds.push(entityId);
       }
       existing.lastState = state;
       applyVisualState(existing, hass, min, max);
@@ -361,7 +363,7 @@ export function syncParticles(
     next.push(created);
   }
 
-  return next;
+  return { particles: next, changedIds };
 }
 
 function paletteColor(
@@ -622,22 +624,6 @@ export interface ReactorConnection {
   toX: number;
   toY: number;
   seed: number;
-}
-
-export function nearestParticles(
-  particles: ReactorParticle[],
-  x: number,
-  y: number,
-  count: number
-): ReactorParticle[] {
-  return [...particles]
-    .filter((particle) => particle.placed)
-    .sort((a, b) => {
-      const da = (a.x - x) ** 2 + (a.y - y) ** 2;
-      const db = (b.x - x) ** 2 + (b.y - y) ** 2;
-      return da - db;
-    })
-    .slice(0, count);
 }
 
 function drawConnections(
