@@ -10,7 +10,6 @@ import type {
 } from "../../types";
 import {
   customHeatColor,
-  heatMapGradientCss,
   levelGradientColor,
   temperatureGradientColor,
   themeHeatColor,
@@ -549,25 +548,25 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       : undefined;
     const unit = String(stateObj?.attributes.unit_of_measurement ?? "");
     const aggregate = this._resolveAggregate(resolveAxes(config.preset));
-    const gradient = heatMapGradientCss(
-      this,
-      mode,
-      config.color_low,
-      config.color_high
-    );
+    const stops = Array.from({ length: 12 }, (_, index) => {
+      const level = index / 11;
+      const pct = (level * 100).toFixed(1);
+      return `${cellBackground(this, level, mode, config, true)} ${pct}%`;
+    });
+    const gradient = `linear-gradient(to right, ${stops.join(", ")})`;
     const mid = (grid.min + grid.max) / 2;
 
     return html`
       <div class="legend-wrap" aria-hidden="true">
-        <div class="legend-labels">
-          <span>${formatLegendValue(grid.max, aggregate, unit)}</span>
-          <span>${formatLegendValue(mid, aggregate, unit)}</span>
-          <span>${formatLegendValue(grid.min, aggregate, unit)}</span>
-        </div>
         <div
           class="legend-bar"
           style=${styleMap({ background: gradient })}
         ></div>
+        <div class="legend-labels">
+          <span>${formatLegendValue(grid.min, aggregate, unit)}</span>
+          <span>${formatLegendValue(mid, aggregate, unit)}</span>
+          <span>${formatLegendValue(grid.max, aggregate, unit)}</span>
+        </div>
       </div>
     `;
   }
@@ -626,9 +625,12 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     xVisible: boolean[]
   ) {
     const row = grid.cells[0] ?? [];
+    const bodyStyle = {
+      "--heatmap-columns": String(Math.max(1, grid.xLabels.length)),
+    };
 
     return html`
-      <div class="heatmap-body">
+      <div class="heatmap-body" style=${styleMap(bodyStyle)}>
         <div class="cells-legend-row">
           <div class="grid-wrap">
             <div class="timeline-grid">
@@ -711,12 +713,16 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       );
     }
 
+    const bodyStyle = {
+      "--heatmap-columns": String(Math.max(1, grid.xLabels.length)),
+    };
+    const rowTemplate = `repeat(${grid.yLabels.length}, minmax(0, 1fr))`;
     const columnTemplate = showLabels
-      ? `auto repeat(${grid.xLabels.length}, minmax(0, 1fr))`
+      ? `minmax(24px, clamp(32px, 16%, 56px)) repeat(${grid.xLabels.length}, minmax(0, 1fr))`
       : `repeat(${grid.xLabels.length}, minmax(0, 1fr))`;
 
     return html`
-      <div class="heatmap-body">
+      <div class="heatmap-body" style=${styleMap(bodyStyle)}>
         <div class="cells-legend-row">
           <div class="grid-stack">
             ${showLabels
@@ -743,7 +749,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
                 class="data-grid"
                 style=${styleMap({
                   gridTemplateColumns: columnTemplate,
-                  gridTemplateRows: `repeat(${grid.yLabels.length}, auto)`,
+                  gridTemplateRows: rowTemplate,
                 })}
               >
                     ${grid.cells.flatMap((row, y) => {
@@ -874,6 +880,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       --tile-color: var(--state-inactive-color);
       display: block;
       height: 100%;
+      container-type: size;
     }
 
     ha-card {
@@ -883,10 +890,10 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     .stage {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: clamp(4px, 1.5cqh, 8px);
       height: 100%;
-      min-height: 120px;
-      padding: var(--ha-space-3, 12px);
+      min-height: 96px;
+      padding: clamp(8px, 2.5cqw, var(--ha-space-3, 12px));
       box-sizing: border-box;
     }
 
@@ -927,6 +934,8 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     }
 
     .heatmap-body {
+      --heatmap-gap: clamp(1px, 0.7cqw, 3px);
+      --heatmap-cell-radius: clamp(2px, 1.2cqw, 6px);
       flex: 1;
       min-height: 0;
       display: flex;
@@ -938,7 +947,8 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       display: flex;
       flex: 1;
       flex-direction: column;
-      gap: 2px;
+      gap: var(--heatmap-gap);
+      min-height: 0;
       min-width: 0;
       overflow: visible;
     }
@@ -946,8 +956,9 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     .cells-legend-row {
       display: flex;
       flex: 1;
+      flex-direction: column;
       align-items: stretch;
-      gap: 10px;
+      gap: clamp(4px, 1.4cqh, 8px);
       min-height: 0;
       min-width: 0;
     }
@@ -956,6 +967,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       position: relative;
       flex: 1;
       min-width: 0;
+      min-height: 0;
       display: flex;
       flex-direction: column;
     }
@@ -963,39 +975,49 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     .x-axis-row,
     .data-grid {
       display: grid;
-      gap: 2px;
-      align-content: start;
+      gap: var(--heatmap-gap);
+      min-width: 0;
     }
 
     .x-axis-row {
       overflow: visible;
       position: relative;
       z-index: 2;
-      min-height: 14px;
-      margin-bottom: 2px;
+      min-height: clamp(10px, 4cqh, 14px);
+      margin-bottom: var(--heatmap-gap);
     }
 
     .data-grid {
-      align-content: start;
+      flex: 1;
+      height: 100%;
+      min-height: 0;
+      align-content: stretch;
     }
 
     .timeline-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 2px;
-      align-content: flex-start;
+      display: grid;
+      flex: 1;
+      grid-template-columns: repeat(
+        auto-fit,
+        minmax(clamp(12px, calc(100% / var(--heatmap-columns)), 22px), 1fr)
+      );
+      grid-auto-rows: minmax(16px, 1fr);
+      gap: var(--heatmap-gap);
+      min-height: 0;
+      align-content: stretch;
     }
 
     .timeline-slot {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 2px;
-      flex: 0 0 auto;
+      gap: var(--heatmap-gap);
+      min-width: 0;
+      min-height: 0;
     }
 
     .timeline-axis {
-      min-height: 12px;
+      min-height: clamp(10px, 3cqh, 12px);
       width: 100%;
       overflow: visible;
       white-space: nowrap;
@@ -1009,9 +1031,10 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 10px;
+      font-size: clamp(8px, 2.5cqw, 10px);
       color: var(--secondary-text-color);
       padding: 0 2px;
+      min-width: 0;
     }
 
     .axis.x {
@@ -1032,9 +1055,10 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     .cell {
       border: none;
-      border-radius: 18%;
-      aspect-ratio: 1;
+      border-radius: var(--heatmap-cell-radius);
       width: 100%;
+      height: 100%;
+      min-height: 4px;
       min-width: 0;
       padding: 0;
       touch-action: manipulation;
@@ -1045,9 +1069,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     }
 
     .timeline-grid .cell {
-      width: 18px;
-      height: 18px;
-      flex: 0 0 18px;
+      flex: 1 1 auto;
     }
 
     .cell.empty {
@@ -1062,7 +1084,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     }
 
     .cell-value {
-      font-size: 9px;
+      font-size: clamp(6px, min(2.4cqw, 2.4cqh), 9px);
       line-height: 1;
       font-weight: var(--ha-font-weight-medium, 500);
       color: var(--primary-text-color);
@@ -1109,31 +1131,63 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     .legend-wrap {
       display: flex;
-      flex-direction: row;
+      flex-direction: column;
       align-items: stretch;
-      gap: 6px;
+      gap: 4px;
       flex-shrink: 0;
       align-self: stretch;
-      height: 100%;
+      width: 100%;
+      height: auto;
+      min-height: 0;
     }
 
     .legend-labels {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       justify-content: space-between;
-      font-size: 10px;
+      gap: 6px;
+      font-size: clamp(8px, 2.4cqw, 10px);
       color: var(--secondary-text-color);
-      text-align: right;
+      text-align: center;
       line-height: 1.2;
-      padding: 2px 0;
-      height: 100%;
+      padding: 0;
+      min-width: 0;
     }
 
     .legend-bar {
-      width: 12px;
+      width: 100%;
+      height: clamp(6px, 1.8cqh, 9px);
+      min-height: 4px;
       border-radius: 4px;
-      height: 100%;
       border: 1px solid var(--divider-color);
+    }
+
+    @container (max-height: 170px) {
+      .stage {
+        gap: 4px;
+        padding: 8px;
+      }
+
+      .legend-wrap {
+        display: none;
+      }
+
+      .x-axis-row {
+        min-height: 10px;
+      }
+
+      .timeline-axis,
+      .cell-value {
+        display: none;
+      }
+    }
+
+    @container (max-width: 220px) {
+      ha-state-icon,
+      .cell-value,
+      .legend-labels span:nth-child(2) {
+        display: none;
+      }
     }
   `,
   ];
