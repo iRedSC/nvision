@@ -1,5 +1,6 @@
-import { css, html, LitElement, nothing } from "lit";
+import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 import type {
   HomeAssistant,
   LovelaceCard,
@@ -109,7 +110,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
   @state() private _slotIds: string[] = Array(INFO_SLOT_COUNT).fill("");
 
-  @state() private _infoChangeFrom: Record<string, string> = {};
+  private _infoChangeFrom: Record<string, string> = {};
 
   @query(".stage") private _stage?: HTMLElement;
 
@@ -173,9 +174,35 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     super.disconnectedCallback();
   }
 
-  protected willUpdate(changed: Map<string, unknown>): void {
+  protected shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.has("_config") || changed.has("_slotIds")) {
+      return true;
+    }
+
+    if (!changed.has("hass")) {
+      return true;
+    }
+
+    const oldHass = changed.get("hass") as HomeAssistant | undefined;
+    if (!oldHass || !this.hass) {
+      return true;
+    }
+
+    for (const entityId of this._slotIds) {
+      if (!entityId) {
+        continue;
+      }
+      if (oldHass.states[entityId] !== this.hass.states[entityId]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  protected willUpdate(changed: PropertyValues): void {
     if ((changed.has("hass") || changed.has("_config")) && this.hass && this._config) {
-      this._syncParticles();
+      this._syncParticles(performance.now(), true);
     }
   }
 
@@ -191,7 +218,10 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     return { width: canvas.clientWidth, height: canvas.clientHeight };
   }
 
-  private _syncParticles(timeMs = performance.now()): void {
+  private _syncParticles(
+    timeMs = performance.now(),
+    applyInfo = true
+  ): void {
     if (!this.hass || !this._config) {
       return;
     }
@@ -238,6 +268,10 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     );
     this._particles = particles;
 
+    if (!applyInfo && !changedIds.length) {
+      return;
+    }
+
     const selection =
       this._config.info_selection ?? DEFAULT_INFO_SELECTION;
 
@@ -250,19 +284,11 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     }
 
     if (this._showInfoChange() && changedIds.length) {
-      const nextChanges = { ...this._infoChangeFrom };
-      let changed = false;
-
       for (const entityId of changedIds) {
         const previous = previousFormatted.get(entityId);
-        if (previous && nextChanges[entityId] !== previous) {
-          nextChanges[entityId] = previous;
-          changed = true;
+        if (previous) {
+          this._infoChangeFrom[entityId] = previous;
         }
-      }
-
-      if (changed) {
-        this._infoChangeFrom = nextChanges;
       }
     }
 
@@ -512,13 +538,11 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
 
       this._resizeObserver = new ResizeObserver(() => {
         this._resizeCanvas();
-        this._syncParticles();
       });
       this._resizeObserver.observe(this._stage ?? canvas.parentElement ?? this);
     }
 
     this._resizeCanvas();
-    this._syncParticles();
 
     if (!this._animating) {
       this._lastFrame = 0;
@@ -582,9 +606,7 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       return;
     }
 
-    if (!this._particles.length) {
-      this._syncParticles(timeMs);
-    }
+    this._syncParticles(timeMs, false);
 
     const reducedMotion = prefersReducedMotion();
     updateParticles(
@@ -641,33 +663,37 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
             ${showInfo
               ? html`
                   <div class="info-bar">
-                    ${this._slotIds.map((entityId, index) => {
-                      const stateObj = entityId
-                        ? this.hass.states[entityId]
-                        : undefined;
+                    ${repeat(
+                      this._slotIds,
+                      (entityId, index) => entityId || `empty-${index}`,
+                      (entityId, index) => {
+                        const stateObj = entityId
+                          ? this.hass!.states[entityId]
+                          : undefined;
 
-                      return html`
-                        <div
-                          class="info-slot"
-                          data-slot=${index}
-                          @click=${(event: Event) => event.stopPropagation()}
-                        >
-                          ${stateObj
-                            ? html`
-                                <ha-state-icon
-                                  .hass=${this.hass}
-                                  .stateObj=${stateObj}
-                                ></ha-state-icon>
-                                <ha-tile-info
-                                  .primary=${stateObj.attributes
-                                    .friendly_name ?? entityId}
-                                  .secondary=${this._slotSecondary(entityId)}
-                                ></ha-tile-info>
-                              `
-                            : html`<span class="info-empty">—</span>`}
-                        </div>
-                      `;
-                    })}
+                        return html`
+                          <div
+                            class="info-slot"
+                            data-slot=${index}
+                            @click=${(event: Event) => event.stopPropagation()}
+                          >
+                            ${stateObj
+                              ? html`
+                                  <ha-state-icon
+                                    .hass=${this.hass}
+                                    .stateObj=${stateObj}
+                                  ></ha-state-icon>
+                                  <ha-tile-info
+                                    .primary=${stateObj.attributes
+                                      .friendly_name ?? entityId}
+                                    .secondary=${this._slotSecondary(entityId)}
+                                  ></ha-tile-info>
+                                `
+                              : html`<span class="info-empty">—</span>`}
+                          </div>
+                        `;
+                      }
+                    )}
                   </div>
                 `
               : nothing}
@@ -739,17 +765,20 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
         min-height: 52px;
         padding: 6px 4px;
         text-align: center;
+        contain: layout style;
       }
 
       .info-slot ha-state-icon {
         --mdc-icon-size: 18px;
         opacity: 0.92;
+        transition: none;
       }
 
       .info-slot ha-tile-info {
         width: 100%;
         --ha-tile-info-primary-font-size: var(--nv-label-font-size, 0.72rem);
         --ha-tile-info-secondary-font-size: var(--nv-subtitle-font-size, 0.66rem);
+        min-height: 2.2em;
       }
 
       .info-empty {
