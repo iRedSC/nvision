@@ -321,6 +321,52 @@ export function orbitTarget(
   return { x, y };
 }
 
+function orbitTangent(
+  particle: ReactorParticle,
+  width: number,
+  height: number,
+  timeMs: number
+): { x: number; y: number } {
+  const here = orbitTarget(particle, width, height, timeMs);
+  const ahead = orbitTarget(particle, width, height, timeMs + 24);
+  const tx = ahead.x - here.x;
+  const ty = ahead.y - here.y;
+  const len = Math.hypot(tx, ty);
+  if (len < 0.01) {
+    return { x: 1, y: 0 };
+  }
+  return { x: tx / len, y: ty / len };
+}
+
+/** Bias repulsion sideways along the orbit so orbs slide past instead of stacking. */
+function slideRepulsionDir(
+  pushDirX: number,
+  pushDirY: number,
+  tangentX: number,
+  tangentY: number
+): { x: number; y: number } {
+  const along = pushDirX * tangentX + pushDirY * tangentY;
+  let perpX = pushDirX - along * tangentX;
+  let perpY = pushDirY - along * tangentY;
+  const perpLen = Math.hypot(perpX, perpY);
+
+  if (perpLen < 0.01) {
+    perpX = -tangentY;
+    perpY = tangentX;
+  } else {
+    perpX /= perpLen;
+    perpY /= perpLen;
+  }
+
+  const blendX = along * 0.22 * tangentX + perpX * 2.1;
+  const blendY = along * 0.22 * tangentY + perpY * 2.1;
+  const blendLen = Math.hypot(blendX, blendY);
+  if (blendLen < 0.01) {
+    return { x: pushDirX, y: pushDirY };
+  }
+  return { x: blendX / blendLen, y: blendY / blendLen };
+}
+
 export function placeParticle(
   particle: ReactorParticle,
   width: number,
@@ -689,15 +735,10 @@ function simulateParticles(
     const particleRadius = collisionRadii[i];
     const mass = Math.max(particleRadius, minRadius) / refRadius;
     const springK = spring * Math.min(1.35, Math.max(0.4, 1 / Math.sqrt(mass)));
-
-    particle.phase +=
-      particle.baseOrbitSpeed *
-      orbitSpeedMultiplier(particle, scale) *
-      delta;
+    const tangent = orbitTangent(particle, width, height, timeMs);
+    let crowdStress = 0;
 
     const target = orbitTarget(particle, width, height, timeMs);
-    particle.vx += (target.x - particle.x) * springK * delta;
-    particle.vy += (target.y - particle.y) * springK * delta;
 
     for (let j = 0; j < particles.length; j += 1) {
       if (j === i) {
@@ -716,6 +757,12 @@ function simulateParticles(
 
       const proximity = (pairDist - dist) / (pairDist - touchDist * 0.65);
       const penetration = Math.max(0, touchDist - dist);
+      crowdStress = Math.max(
+        crowdStress,
+        proximity * 0.45,
+        penetration / touchDist
+      );
+
       const massRatio = Math.max(otherRadius, minRadius) / Math.max(particleRadius, minRadius);
       const push =
         (proximity ** 1.2 + (penetration / touchDist) * 2.5) *
@@ -723,15 +770,36 @@ function simulateParticles(
         massRatio *
         delta;
 
-      particle.vx += (dx / dist) * push;
-      particle.vy += (dy / dist) * push;
+      const pushDirX = dx / dist;
+      const pushDirY = dy / dist;
+      const slide = slideRepulsionDir(
+        pushDirX,
+        pushDirY,
+        tangent.x,
+        tangent.y
+      );
+
+      particle.vx += slide.x * push;
+      particle.vy += slide.y * push;
 
       if (penetration > 0) {
         const separate = (penetration / touchDist) * 0.35 * (1 / mass) * delta;
-        particle.x += (dx / dist) * separate;
-        particle.y += (dy / dist) * separate;
+        particle.x += slide.x * separate;
+        particle.y += slide.y * separate;
       }
     }
+
+    const springScale = 1 - Math.min(0.88, crowdStress * 0.92);
+    const orbitScale = 1 - Math.min(0.75, crowdStress * 0.8);
+
+    particle.phase +=
+      particle.baseOrbitSpeed *
+      orbitSpeedMultiplier(particle, scale) *
+      orbitScale *
+      delta;
+
+    particle.vx += (target.x - particle.x) * springK * springScale * delta;
+    particle.vy += (target.y - particle.y) * springK * springScale * delta;
 
     const toCenterX = cx - particle.x;
     const toCenterY = cy - particle.y;
