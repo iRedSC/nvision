@@ -14,16 +14,16 @@ export interface ReactorTempDrawState {
 
 const ORB_COUNT = 7;
 
-/** Distinct plasma tones from stable coolant through meltdown. */
+/** Distinct plasma tones from stable coolant through critical heat. */
 const PLASMA: Array<[number, number, number]> = [
   [118, 198, 255],
   [72, 152, 238],
   [48, 214, 196],
   [255, 176, 58],
   [255, 96, 36],
-  [255, 48, 108],
-  [255, 214, 92],
-  [255, 248, 228],
+  [255, 48, 72],
+  [220, 36, 28],
+  [180, 22, 38],
 ];
 
 function fract(value: number): number {
@@ -62,7 +62,6 @@ function orbCriticalColor(
     3 +
     ((orbIndex * 2 + Math.floor(heat * 3)) % (PLASMA.length - 3));
   const hot = PLASMA[hotSlot];
-  const meltdown = PLASMA[PLASMA.length - 1];
 
   if (heat < 0.28) {
     return mixRgb(cold, PLASMA[2], heat / 0.28);
@@ -79,8 +78,8 @@ function orbCriticalColor(
   }
 
   const local = (heat - 0.82) / 0.18;
-  const critical = mixRgb(PLASMA[5 + (orbIndex % 2)], meltdown, local);
-  return mixRgb(critical, hot, (orbIndex / Math.max(1, orbCount - 1)) * 0.22);
+  const critical = mixRgb(PLASMA[5 + (orbIndex % 2)], PLASMA[6 + (orbIndex % 2)], local);
+  return mixRgb(critical, PLASMA[4], (orbIndex / Math.max(1, orbCount - 1)) * 0.18);
 }
 
 function drawBlob(
@@ -92,7 +91,9 @@ function drawBlob(
   alpha: number,
   hotCore = false
 ): void {
-  const coreRgb = hotCore ? mixRgb(rgb, [255, 255, 255], 0.55) : rgb;
+  const coreRgb = hotCore
+    ? mixRgb(rgb, [255, 118, 48], 0.42)
+    : rgb;
   const gradient = ctx.createRadialGradient(
     x,
     y,
@@ -236,9 +237,11 @@ function drawCore(
   const heat = smoothstep(tempNorm);
   const intensity = 0.18 + heat * 0.82;
   const baseRadius = base * (0.2 + intensity * 0.22);
-  const phase = reducedMotion ? 0 : timeMs * (0.0008 + Math.pow(intensity, 1.65) * 0.0075);
-  const churn = Math.pow(intensity, 1.85);
-  const pulse = 1 + Math.sin(phase * 5.4) * churn * 0.12;
+  const agitation = Math.pow(intensity, 1.25) * (1.08 - heat * 0.42);
+  const phase = reducedMotion
+    ? 0
+    : timeMs * (0.0008 + agitation * 0.0042);
+  const pulse = 1 + Math.sin(phase * 4.8) * agitation * 0.07;
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
@@ -246,53 +249,53 @@ function drawCore(
   const centerColor = orbCriticalColor(tempNorm, 0, 1);
   drawBlob(
     ctx,
-    cx + Math.sin(phase * 1.6) * baseRadius * churn * 0.08,
-    cy + Math.cos(phase * 1.35) * baseRadius * churn * 0.08,
-    baseRadius * (0.72 + churn * 0.28) * pulse,
+    cx + Math.sin(phase * 1.6) * baseRadius * agitation * 0.06,
+    cy + Math.cos(phase * 1.35) * baseRadius * agitation * 0.06,
+    baseRadius * (0.72 + agitation * 0.22) * pulse,
     centerColor,
     0.28 + intensity * 0.52,
-    heat > 0.55
+    heat > 0.62
   );
 
   for (let index = 0; index < ORB_COUNT; index++) {
     const seed = index * 2.399963;
     const orbitRadius =
-      baseRadius * (0.12 + churn * (0.28 + fract(seed) * 0.34));
-    const orbitSpeed = 0.65 + index * 0.19 + intensity * 1.45;
+      baseRadius * (0.12 + agitation * (0.22 + fract(seed) * 0.26));
+    const orbitSpeed = 0.65 + index * 0.16 + intensity * 0.95;
     const angle = phase * orbitSpeed + seed * Math.PI * 2;
     const wobbleX =
-      Math.cos(angle * 2.6 + phase * 1.8) * baseRadius * churn * 0.22;
+      Math.cos(angle * 2.6 + phase * 1.8) * baseRadius * agitation * 0.14;
     const wobbleY =
-      Math.sin(angle * 2.1 + phase * 2.2) * baseRadius * churn * 0.2;
+      Math.sin(angle * 2.1 + phase * 2.2) * baseRadius * agitation * 0.12;
     const x =
       cx +
       Math.cos(angle) * orbitRadius +
-      Math.cos(angle * 1.7 + phase * 2.4) * baseRadius * churn * 0.18 +
+      Math.cos(angle * 1.7 + phase * 2.4) * baseRadius * agitation * 0.12 +
       wobbleX;
     const y =
       cy +
       Math.sin(angle * 1.11) * orbitRadius +
-      Math.sin(angle * 1.4 + phase * 1.9) * baseRadius * churn * 0.16 +
+      Math.sin(angle * 1.4 + phase * 1.9) * baseRadius * agitation * 0.1 +
       wobbleY;
     const sizeBias = 0.52 + fract(seed * 1.31) * 0.38;
     const blobRadius =
-      baseRadius * sizeBias * (0.78 + intensity * 0.55) * pulse;
+      baseRadius * sizeBias * (0.78 + intensity * 0.45) * pulse;
     const rgb = orbCriticalColor(tempNorm, index + 1, ORB_COUNT);
     const alpha = 0.18 + intensity * 0.44 + fract(seed) * 0.08;
 
-    drawBlob(ctx, x, y, blobRadius, rgb, alpha, heat > 0.72 && index % 3 === 0);
+    drawBlob(ctx, x, y, blobRadius, rgb, alpha, heat > 0.78 && index % 3 === 0);
   }
 
-  if (heat > 0.68) {
-    const flash = 0.5 + Math.sin(phase * 8.2 + 1.3) * 0.5;
+  if (heat > 0.78) {
+    const flash = 0.5 + Math.sin(phase * 4.2 + 1.3) * 0.5;
     drawBlob(
       ctx,
       cx,
       cy,
-      baseRadius * (0.34 + flash * 0.16),
-      PLASMA[PLASMA.length - 1],
-      0.08 + flash * churn * 0.22,
-      true
+      baseRadius * (0.3 + flash * 0.08),
+      PLASMA[6],
+      0.06 + flash * heat * 0.14,
+      false
     );
   }
 
