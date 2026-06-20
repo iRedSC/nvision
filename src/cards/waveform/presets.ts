@@ -43,6 +43,7 @@ interface MotionInput {
   count: number;
   phase: number;
   intensity: number;
+  chaosAt: number;
   scale: number;
   baseX: number;
   baseY: number;
@@ -89,16 +90,16 @@ function smoothstep(value: number): number {
 }
 
 function motionAmplitude(intensity: number, height: number): number {
-  const t = Math.max(0.08, intensity);
+  const t = intensity;
   const spread = smoothstep(t);
   const surge = Math.max(0, t - 0.5) ** 2;
-  const lowBias = (1 - spread) * 0.16;
-  return height * (0.28 + lowBias + spread * 0.22 + surge * 0.26);
+  const lowBias = (1 - spread) * 0.1;
+  return height * (0.08 + lowBias + spread * 0.22 + surge * 0.3);
 }
 
 function motionFrequency(intensity: number): number {
-  const spread = smoothstep(Math.max(0.08, intensity));
-  return 0.42 + spread * 0.68;
+  const spread = smoothstep(intensity);
+  return 0.35 + spread * 0.72;
 }
 
 function motionAxes(input: MotionInput): AxisVectors {
@@ -118,16 +119,22 @@ function motionAxes(input: MotionInput): AxisVectors {
   };
 }
 
-function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: number } {
+function applyChaos(
+  input: MotionInput,
+  x: number,
+  y: number,
+  chaosAt: number
+): { x: number; y: number } {
   const { dot, index, phase, intensity, variant, height } = input;
-  if (intensity <= 0.38) {
+  if (intensity < chaosAt) {
     return { x, y };
   }
 
   const axes = motionAxes(input);
   const localPhase = (phase + variant * 1.4) * (1 + intensity * 0.18);
   const localIndex = index + variant * 0.47;
-  const disturb = intensity * intensity;
+  const chaosRange = Math.max(0.001, 1 - chaosAt);
+  const disturb = ((intensity - chaosAt) / chaosRange) ** 2;
 
   let perp =
     Math.sin(localPhase * (3.1 + dot.seed * 2.4) + localIndex * 0.85) *
@@ -135,8 +142,8 @@ function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: n
     disturb *
     0.12;
 
-  if (intensity > 0.45) {
-    const chaos = (intensity - 0.45) ** 2;
+  if (intensity > chaosAt + chaosRange * 0.15) {
+    const chaos = disturb ** 1.5;
     perp +=
       Math.cos(localPhase * 7.4 + localIndex * 1.7 + dot.phase + variant) *
       height *
@@ -152,8 +159,11 @@ function applyChaos(input: MotionInput, x: number, y: number): { x: number; y: n
   };
 }
 
-function withChaos(input: MotionInput, params: DotDrawParams): DotDrawParams {
-  const { x, y } = applyChaos(input, params.x, params.y);
+function withChaos(
+  input: MotionInput,
+  params: DotDrawParams
+): DotDrawParams {
+  const { x, y } = applyChaos(input, params.x, params.y, input.chaosAt);
   return { ...params, x, y };
 }
 
@@ -329,7 +339,7 @@ function spawnMotion(input: MotionInput): DotDrawParams {
 function jetMotion(input: MotionInput): DotDrawParams {
   const { dot, index, count, phase, intensity, height, width, baseX, baseY, layout } =
     input;
-  const spread = smoothstep(Math.max(0.1, intensity));
+  const spread = smoothstep(intensity);
   const baseSpeed = 0.16 + spread * 0.78;
   const dotSpeed = baseSpeed * (0.4 + dot.seed * 1.35);
   const primaryAmp = motionAmplitude(intensity, height) * (0.035 + spread * 0.1);
@@ -430,7 +440,8 @@ export function computeDotDrawParams(
   intensity: number,
   width: number,
   height: number,
-  variant: 0 | 1
+  variant: 0 | 1,
+  chaosAt: number
 ): DotDrawParams {
   const scale = Math.min(width, height);
   const base = basePosition(
@@ -448,6 +459,7 @@ export function computeDotDrawParams(
     count,
     phase,
     intensity,
+    chaosAt,
     scale,
     baseX: base.x,
     baseY: base.y,

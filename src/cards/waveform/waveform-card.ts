@@ -115,6 +115,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   private _animating = false;
   private _lastFrame = 0;
   private _phase = 0;
+  private _shakePhase = 0;
   private _displayIntensity = 0;
   private _targetIntensity = 0;
   private _dots: ScopeDot[] = buildDots(24);
@@ -178,6 +179,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     this._stopAnimation();
     this._resizeObserver?.disconnect();
     this.style.transform = "";
+    this._shakePhase = 0;
     super.disconnectedCallback();
   }
 
@@ -286,7 +288,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     return this._displayIntensity;
   }
 
-  private _applyShake(activity: number): void {
+  private _applyShake(activity: number, shakePhase: number): void {
     const { shakeAt, shakePeak } = this._shakeThresholds();
 
     if (activity < shakeAt) {
@@ -295,7 +297,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     }
 
     const amount = ((activity - shakeAt) / (1 - shakeAt)) * shakePeak;
-    const t = this._phase;
+    const t = shakePhase;
     const x =
       Math.sin(t * 14.3) * amount * 2.4 +
       Math.cos(t * 19.7) * amount * 1.2;
@@ -313,7 +315,8 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     y: number,
     radius: number,
     color: string,
-    alpha: number
+    alpha: number,
+    glow: number
   ): void {
     if (alpha <= 0.01) {
       return;
@@ -321,7 +324,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
     ctx.save();
     ctx.shadowColor = color;
-    ctx.shadowBlur = radius * 2.4;
+    ctx.shadowBlur = radius * glow;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fillStyle = color;
@@ -352,24 +355,26 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
     this._syncIntensity();
     const rawIntensity = this._tickIntensity(delta);
-    const animIntensity = Math.max(0.12, rawIntensity);
     const { shakeAt, shakeSpeed } = this._shakeThresholds();
     const presets = this._presets();
-    const frenzy =
-      rawIntensity > shakeAt
-        ? 1 + (rawIntensity - shakeAt) * 2.2
-        : 1;
+
     this._phase +=
       delta *
-      (0.014 + animIntensity * animIntensity * 0.1) *
-      presets.phaseSpeed *
-      frenzy *
-      shakeSpeed;
-    this._applyShake(rawIntensity);
+      (0.014 + rawIntensity * rawIntensity * 0.1) *
+      presets.phaseSpeed;
+
+    if (rawIntensity >= shakeAt) {
+      this._shakePhase += delta * shakeSpeed * 0.06;
+      this._applyShake(rawIntensity, this._shakePhase);
+    } else {
+      this._shakePhase = 0;
+      this._applyShake(rawIntensity, 0);
+    }
 
     const waveColor = resolveWaveColor(this._config?.color, this);
     const scale = Math.min(width, height);
     const baseRadius = baseDotRadius(scale, presets.dotScale);
+    const highBoost = Math.max(0, rawIntensity - 0.55);
 
     ctx.clearRect(0, 0, width, height);
 
@@ -380,10 +385,11 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
         i,
         this._dots.length,
         this._phase,
-        Math.max(0.12, rawIntensity),
+        rawIntensity,
         width,
         height,
-        0
+        0,
+        shakeAt
       );
 
       const fade =
@@ -396,11 +402,16 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
           presets.layout
         ) * contentFade(params.x, params.y, width, height);
       const radius =
-        baseRadius * params.radiusMul * (0.82 + animIntensity * 0.28);
+        baseRadius *
+        params.radiusMul *
+        (0.75 + rawIntensity * 0.35 + highBoost * 0.45);
       const alpha =
-        (0.3 + animIntensity * 0.52) * params.alphaMul * fade;
+        (0.18 + rawIntensity * 0.42 + highBoost * highBoost * 1.1) *
+        params.alphaMul *
+        fade;
+      const glow = 2.2 + rawIntensity * 1.4 + highBoost * 1.6;
 
-      this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha);
+      this._drawDot(ctx, params.x, params.y, radius, waveColor, alpha, glow);
     }
   }
 
