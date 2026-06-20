@@ -101,9 +101,13 @@ export function defaultAggregate(
   return "mean";
 }
 
-/** Statistics summarize whole periods; end-of-period values need raw history. */
+/** Raw history is required to resolve true end-of-bucket values. */
 export function prefersRawHistory(aggregate: AggregateType): boolean {
-  return aggregate === "last" || aggregate === "max";
+  return aggregate === "last";
+}
+
+function needsPeakPreservation(aggregate: AggregateType): boolean {
+  return aggregate === "max" || aggregate === "last";
 }
 
 function historyToPoints(
@@ -143,7 +147,7 @@ function statisticField(
     case "sum":
       return value.sum ?? value.change ?? undefined;
     case "max":
-      return value.max ?? undefined;
+      return value.max ?? value.state ?? undefined;
     case "min":
       return value.min ?? undefined;
     case "last":
@@ -180,17 +184,40 @@ const MAX_RAW_HISTORY_POINTS = 8000;
 
 function downsamplePoints(
   points: HistoryPoint[],
-  maxPoints: number
+  maxPoints: number,
+  preservePeaks = false
 ): HistoryPoint[] {
   if (points.length <= maxPoints) {
     return points;
   }
 
-  const step = Math.ceil(points.length / maxPoints);
+  const chunkSize = Math.ceil(points.length / maxPoints);
   const sampled: HistoryPoint[] = [];
-  for (let index = 0; index < points.length; index += step) {
-    sampled.push(points[index]);
+
+  for (let index = 0; index < points.length; index += chunkSize) {
+    const chunk = points.slice(index, index + chunkSize);
+    if (!chunk.length) {
+      continue;
+    }
+
+    if (preservePeaks) {
+      sampled.push(
+        chunk.reduce((best, point) => {
+          if (point.value > best.value) {
+            return point;
+          }
+          if (point.value === best.value && point.time > best.time) {
+            return point;
+          }
+          return best;
+        }, chunk[0])
+      );
+      continue;
+    }
+
+    sampled.push(chunk[0]);
   }
+
   return sampled;
 }
 
@@ -209,9 +236,11 @@ export async function fetchHistoryPoints(
   entityId: string,
   start: Date,
   end: Date,
-  binary: boolean
+  binary: boolean,
+  aggregate: AggregateType = "mean"
 ): Promise<HistoryPoint[]> {
   const callWS = requireCallWS(hass);
+  const fullHistory = needsPeakPreservation(aggregate);
   const response = await callWS<
     Record<string, EntityHistoryState[]> | EntityHistoryState[][]
   >({
@@ -221,12 +250,13 @@ export async function fetchHistoryPoints(
     entity_ids: [entityId],
     minimal_response: true,
     no_attributes: true,
-    significant_changes_only: true,
+    significant_changes_only: !fullHistory,
   });
 
   return downsamplePoints(
     historyToPoints(normalizeHistoryResponse(response, entityId), binary),
-    MAX_RAW_HISTORY_POINTS
+    MAX_RAW_HISTORY_POINTS,
+    fullHistory
   );
 }
 
@@ -271,7 +301,26 @@ export async function loadHistoryPoints(
   const binary = isBinaryEntity(entityId);
 
   if (binary || aggregate === "count") {
-    return fetchHistoryPoints(hass, entityId, start, end, true);
+    return fetchHistoryPoints(hass, entityId, start, end, true, aggregate);
+  }
+
+  if (periodHours >= 24 && (aggregate === "max" || aggregate === "sum")) {
+    try {
+      const period = periodHours > 24 * 14 ? "day" : "hour";
+      const stats = await fetchStatisticsPoints(
+        hass,
+        entityId,
+        start,
+        end,
+        aggregate,
+        period
+      );
+      if (stats.length > 0) {
+        return stats;
+      }
+    } catch {
+      // Fall back to raw history below.
+    }
   }
 
   if (periodHours >= 24 && !prefersRawHistory(aggregate)) {
@@ -293,24 +342,5 @@ export async function loadHistoryPoints(
     }
   }
 
-  if (periodHours >= 24 && aggregate === "max") {
-    try {
-      const period = periodHours > 24 * 14 ? "day" : "hour";
-      const stats = await fetchStatisticsPoints(
-        hass,
-        entityId,
-        start,
-        end,
-        "max",
-        period
-      );
-      if (stats.length > 0) {
-        return stats;
-      }
-    } catch {
-      // Fall back to raw history below.
-    }
-  }
-
-  return fetchHistoryPoints(hass, entityId, start, end, false);
+  return fetchHistoryPoints(hass, entityId, start, end, false, aggregate);
 }

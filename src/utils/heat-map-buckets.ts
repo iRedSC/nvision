@@ -48,7 +48,7 @@ export const PRESET_AXES: Record<
   week_hourly: { x: "hour", y: "day", period: "7d" },
   two_weeks: { x: "hour", y: "day", period: "14d" },
   daily_rhythm: { x: "hour", y: "weekday", period: "30d" },
-  month_days: { x: "day", y: "week", period: "30d" },
+  month_days: { x: "weekday", y: "week", period: "30d" },
   month_calendar: { x: "weekday", y: "week", period: "90d" },
   quarter: { x: "week", y: "month", period: "90d" },
   timeline_24h: { x: "time", y: "none", period: "24h" },
@@ -417,12 +417,12 @@ function aggregateSamples(
 
 const CALENDAR_AXIS_FIELDS: AxisField[] = ["day", "week", "month"];
 
-/** Calendar buckets need end-of-period values (e.g. tally before midnight reset). */
+/** Calendar buckets use max — peak before a daily reset is the period total. */
 export function resolveBucketAggregate(
   xField: AxisField,
   yField: AxisField,
   aggregate: AggregateType,
-  attributes?: Record<string, unknown>
+  _attributes?: Record<string, unknown>
 ): AggregateType {
   if (aggregate === "count") {
     return "count";
@@ -432,20 +432,11 @@ export function resolveBucketAggregate(
     CALENDAR_AXIS_FIELDS.includes(xField) ||
     CALENDAR_AXIS_FIELDS.includes(yField);
 
-  if (!calendarView) {
-    return aggregate;
-  }
-
-  if (isCounterLike(attributes)) {
+  if (calendarView) {
     return "max";
   }
 
-  return "last";
-}
-
-function isCounterLike(attributes?: Record<string, unknown>): boolean {
-  const stateClass = attributes?.state_class;
-  return stateClass === "total_increasing" || stateClass === "total";
+  return aggregate;
 }
 
 function formatHourLabel(hour: number): string {

@@ -111,13 +111,10 @@ function cellBackground(
   }
 
   const color = resolveHeatColor(host, level, mode, config);
-  if (config.dim_low_values) {
-    const mix = Math.max(level, 0.08) * 85;
-    return `color-mix(in srgb, ${color} ${mix}%, var(--card-background-color))`;
-  }
-
-  const mix = Math.max(level * 100, 8);
-  return `color-mix(in srgb, ${color} ${mix}%, var(--card-background-color))`;
+  const mix =
+    config.dim_low_values === true ? level * level * 100 : level * 100;
+  const clamped = Math.min(100, Math.max(6, mix));
+  return `color-mix(in srgb, ${color} ${clamped}%, var(--card-background-color))`;
 }
 
 function formatCellValue(
@@ -629,10 +626,9 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     return html`
       <div class="heatmap-body">
-        <div class="grid-column">
-          <div class="cells-legend-row">
-            <div class="grid-wrap">
-              <div class="timeline-grid">
+        <div class="cells-legend-row">
+          <div class="grid-wrap">
+            <div class="timeline-grid">
                 ${row.map(
                   (cell, x) => html`
                     <div class="timeline-slot">
@@ -656,8 +652,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
               </div>
               ${this._renderPopover()}
             </div>
-            ${showLegend ? this._renderLegend(grid) : nothing}
-          </div>
+          ${showLegend ? this._renderLegend(grid) : nothing}
         </div>
       </div>
     `;
@@ -719,37 +714,35 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
     return html`
       <div class="heatmap-body">
-        <div class="grid-column">
-          <div class="cells-legend-row">
-            <div class="grid-stack">
-              ${showLabels
-                ? html`
-                    <div
-                      class="x-axis-row"
-                      style=${styleMap({
-                        gridTemplateColumns: columnTemplate,
-                      })}
-                    >
-                      <div class="corner"></div>
-                      ${grid.xLabels.map(
-                        (label, x) => html`
-                          <div class="axis x">
-                            ${xVisible[x] ? label : nothing}
-                          </div>
-                        `
-                      )}
-                    </div>
-                  `
-                : nothing}
-              <div class="cells-legend-row">
-                <div class="grid-wrap">
+        <div class="cells-legend-row">
+          <div class="grid-stack">
+            ${showLabels
+              ? html`
                   <div
-                    class="data-grid"
+                    class="x-axis-row"
                     style=${styleMap({
                       gridTemplateColumns: columnTemplate,
-                      gridTemplateRows: `repeat(${grid.yLabels.length}, auto)`,
                     })}
                   >
+                    <div class="corner"></div>
+                    ${grid.xLabels.map(
+                      (label, x) => html`
+                        <div class="axis x">
+                          ${xVisible[x] ? label : nothing}
+                        </div>
+                      `
+                    )}
+                  </div>
+                `
+              : nothing}
+            <div class="grid-wrap">
+              <div
+                class="data-grid"
+                style=${styleMap({
+                  gridTemplateColumns: columnTemplate,
+                  gridTemplateRows: `repeat(${grid.yLabels.length}, auto)`,
+                })}
+              >
                     ${grid.cells.flatMap((row, y) => {
                       const rowNum = y + 1;
                       const yLabel = showLabels
@@ -818,10 +811,8 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
                   </div>
                   ${this._renderPopover()}
                 </div>
-                ${showLegend ? this._renderLegend(grid) : nothing}
               </div>
-            </div>
-          </div>
+          ${showLegend ? this._renderLegend(grid) : nothing}
         </div>
       </div>
     `;
@@ -937,25 +928,25 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       min-height: 0;
       display: flex;
       flex-direction: column;
-    }
-
-    .grid-column {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
+      overflow: visible;
     }
 
     .grid-stack {
       display: flex;
+      flex: 1;
       flex-direction: column;
       gap: 2px;
+      min-width: 0;
+      overflow: visible;
     }
 
     .cells-legend-row {
       display: flex;
+      flex: 1;
       align-items: stretch;
       gap: 10px;
+      min-height: 0;
+      min-width: 0;
     }
 
     .grid-wrap {
@@ -971,6 +962,14 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       display: grid;
       gap: 2px;
       align-content: start;
+    }
+
+    .x-axis-row {
+      overflow: visible;
+      position: relative;
+      z-index: 2;
+      min-height: 14px;
+      margin-bottom: 2px;
     }
 
     .data-grid {
@@ -995,6 +994,8 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     .timeline-axis {
       min-height: 12px;
       width: 100%;
+      overflow: visible;
+      white-space: nowrap;
     }
 
     .corner {
@@ -1007,13 +1008,21 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       justify-content: center;
       font-size: 10px;
       color: var(--secondary-text-color);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
       padding: 0 2px;
     }
 
+    .axis.x {
+      overflow: visible;
+      white-space: nowrap;
+      text-overflow: clip;
+      position: relative;
+      z-index: 1;
+    }
+
     .axis.y {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       justify-content: flex-end;
       padding-right: 4px;
     }

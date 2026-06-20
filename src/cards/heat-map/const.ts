@@ -21,7 +21,7 @@ export const PRESET_OPTIONS = [
   { value: "week_hourly", label: "Week — hour × day" },
   { value: "two_weeks", label: "Two weeks — hour × day" },
   { value: "daily_rhythm", label: "Daily rhythm — hour × weekday" },
-  { value: "month_days", label: "Month — day × week" },
+  { value: "month_days", label: "Month — weekday × week" },
   { value: "month_calendar", label: "Quarter calendar — weekday × week" },
   { value: "quarter", label: "Quarter — week × month" },
   { value: "timeline_24h", label: "Timeline — 24 hours" },
