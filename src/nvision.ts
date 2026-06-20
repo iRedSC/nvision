@@ -10,6 +10,7 @@ import "./cards/power-draw/power-draw-card";
 import "./cards/power-glance/power-glance-card";
 import "./cards/light/light-card";
 import "./cards/heat-map/heat-map-card";
+import "./cards/reactor-core/reactor-core-card";
 
 console.info(
   `%c nvision ${version} `,
