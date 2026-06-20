@@ -1,9 +1,4 @@
 import type { HomeAssistant } from "../../types";
-import { isBinaryEntity } from "../../utils/history-data";
-import {
-  normalizeValue,
-  parseNumericState,
-} from "../../utils/power-lightning";
 import type { ReactorCoreCardConfig } from "./reactor-core-card-config";
 import {
   DEFAULT_DOMAINS,
@@ -11,12 +6,17 @@ import {
   DEFAULT_MAX_PARTICLES,
   DEFAULT_MIN,
 } from "./const";
-
-export type ParticleKind = "binary" | "numeric" | "other";
+import {
+  classifyParticleKind,
+  readParticleVisualState,
+  type ParticleKind,
+} from "./reactor-entity-state";
 
 /** Normalized radii for concentric orbital shells (fraction of usable half-axis). */
 const SHELL_RADII = [0.42, 0.58, 0.72, 0.84];
 const PULSE_LIFE_MS = 1400;
+
+export type { ParticleKind };
 
 export interface ReactorPulse {
   x: number;
@@ -38,11 +38,14 @@ export interface ReactorParticle {
   slotsOnShell: number;
   orbitTilt: number;
   orbitRyScale: number;
-  orbitSpeed: number;
+  baseOrbitSpeed: number;
   wobbleSpeed: number;
-  binaryOn: boolean;
+  isOn: boolean;
   lastState?: string;
   numericNorm: number;
+  lightColor?: string;
+  lightBrightness: number;
+  timerUrgency: number;
   unavailable: boolean;
   placed: boolean;
 }
@@ -80,48 +83,6 @@ function matchesExclude(entityId: string, exclude: string[]): boolean {
   return false;
 }
 
-export function classifyParticleKind(
-  hass: HomeAssistant,
-  entityId: string
-): ParticleKind {
-  if (isBinaryEntity(entityId)) {
-    return "binary";
-  }
-
-  const state = hass.states[entityId]?.state;
-  if (parseNumericState(state) !== undefined) {
-    return "numeric";
-  }
-
-  return "other";
-}
-
-function isBinaryOn(hass: HomeAssistant, entityId: string): boolean {
-  const state = hass.states[entityId]?.state;
-  if (state === undefined || state === "unavailable" || state === "unknown") {
-    return false;
-  }
-  return (
-    state === "on" ||
-    state === "true" ||
-    state === "open" ||
-    state === "home"
-  );
-}
-
-function numericNormForEntity(
-  hass: HomeAssistant,
-  entityId: string,
-  min: number,
-  max: number
-): number {
-  const value = parseNumericState(hass.states[entityId]?.state);
-  if (value === undefined) {
-    return 0.35;
-  }
-  return normalizeValue(value, min, max);
-}
-
 function shellLayout(
   index: number,
   count: number
@@ -143,6 +104,29 @@ function pulseHue(seed: number, timeMs: number): number {
   const next = (idx + 1) % PALETTE_HUES.length;
   const blend = cycle - idx;
   return PALETTE_HUES[idx] + (PALETTE_HUES[next] - PALETTE_HUES[idx]) * blend;
+}
+
+function applyVisualState(
+  particle: ReactorParticle,
+  hass: HomeAssistant,
+  min: number,
+  max: number
+): void {
+  const visual = readParticleVisualState(hass, particle.entityId, min, max);
+  particle.kind = visual.kind;
+  particle.isOn = visual.isOn;
+  particle.numericNorm = visual.numericNorm;
+  particle.lightColor = visual.lightColor;
+  particle.lightBrightness = visual.lightBrightness;
+  particle.timerUrgency = visual.timerUrgency;
+  particle.unavailable = visual.unavailable;
+}
+
+function orbitSpeedMultiplier(particle: ReactorParticle): number {
+  if (particle.kind === "numeric") {
+    return 0.35 + particle.numericNorm * 1.35;
+  }
+  return 1;
 }
 
 export function spawnPulse(particle: ReactorParticle, pulses: ReactorPulse[]): void {
@@ -194,14 +178,12 @@ function createParticle(
   const seed = hashSeed(entityId);
   const seedY = hashSeed(`${entityId}:y`);
   const layout = shellLayout(index, count);
-  const kind = classifyParticleKind(hass, entityId);
-  const numericNorm = numericNormForEntity(hass, entityId, min, max);
   const state = hass.states[entityId]?.state;
   const direction = layout.shell % 2 === 0 ? 1 : -1;
 
-  return {
+  const particle: ReactorParticle = {
     entityId,
-    kind,
+    kind: classifyParticleKind(hass, entityId),
     seed,
     seedY,
     x: 0,
@@ -212,14 +194,19 @@ function createParticle(
     slotsOnShell: layout.slotsOnShell,
     orbitTilt: seed * TAU,
     orbitRyScale: 0.62 + seedY * 0.32,
-    orbitSpeed: direction * (0.00055 + seed * 0.00075),
+    baseOrbitSpeed: direction * (0.00055 + seed * 0.00075),
     wobbleSpeed: 0.0016 + seedY * 0.0024,
-    binaryOn: isBinaryOn(hass, entityId),
+    isOn: false,
     lastState: state,
-    numericNorm,
+    numericNorm: 0.35,
+    lightBrightness: 0,
+    timerUrgency: 0,
     unavailable: state === "unavailable" || state === "unknown",
     placed: false,
   };
+
+  applyVisualState(particle, hass, min, max);
+  return particle;
 }
 
 function layoutMetrics(
@@ -302,9 +289,6 @@ export function syncParticles(
     const existing = byId.get(entityId);
     if (existing) {
       const layout = shellLayout(index, entityIds.length);
-      const kind = classifyParticleKind(hass, entityId);
-      const numericNorm = numericNormForEntity(hass, entityId, min, max);
-      const binaryOn = isBinaryOn(hass, entityId);
       const state = hass.states[entityId]?.state ?? "";
 
       existing.shell = layout.shell;
@@ -319,12 +303,7 @@ export function syncParticles(
         spawnPulse(existing, pulses);
       }
       existing.lastState = state;
-      existing.kind = kind;
-      existing.numericNorm = numericNorm;
-      existing.binaryOn = binaryOn;
-      existing.unavailable =
-        hass.states[entityId]?.state === "unavailable" ||
-        hass.states[entityId]?.state === "unknown";
+      applyVisualState(existing, hass, min, max);
 
       next.push(existing);
       continue;
@@ -347,7 +326,7 @@ export function syncParticles(
   return next;
 }
 
-function particleColor(
+function paletteColor(
   particle: ReactorParticle,
   timeMs: number,
   alpha: number
@@ -356,10 +335,7 @@ function particleColor(
 
   let sat = 82;
   let light = 58;
-  if (particle.kind === "binary") {
-    sat = particle.binaryOn ? 96 : 58;
-    light = particle.binaryOn ? 70 : 38;
-  } else if (particle.unavailable) {
+  if (particle.unavailable) {
     sat = 18;
     light = 42;
   }
@@ -385,6 +361,120 @@ function drawGlowDot(
   ctx.arc(x, y, radius, 0, TAU);
   ctx.fillStyle = color;
   ctx.fill();
+}
+
+function drawToggleParticle(
+  ctx: CanvasRenderingContext2D,
+  particle: ReactorParticle,
+  scale: number,
+  timeMs: number
+): void {
+  const coreRadius = scale * 0.014;
+  const ringRadius = coreRadius * 2.35;
+  const flashSpeed = particle.isOn ? 0.013 : 0.007;
+  const ringAlpha = particle.isOn
+    ? 0.28 + Math.sin(timeMs * flashSpeed + particle.seed * 12) * 0.42
+    : 0.06 + Math.sin(timeMs * flashSpeed + particle.seed * 12) * 0.05;
+  const coreAlpha = particle.isOn ? 0.92 : 0.32;
+  const hue = pulseHue(particle.seed, timeMs);
+
+  ctx.beginPath();
+  ctx.arc(particle.x, particle.y, coreRadius, 0, TAU);
+  ctx.fillStyle = particle.unavailable
+    ? `hsla(${hue}, 18%, 42%, 0.35)`
+    : `hsla(${hue}, ${particle.isOn ? 88 : 42}%, ${particle.isOn ? 62 : 38}%, ${coreAlpha})`;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(particle.x, particle.y, ringRadius, 0, TAU);
+  ctx.strokeStyle = particle.unavailable
+    ? `hsla(${hue}, 12%, 45%, 0.12)`
+    : `hsla(${hue}, ${particle.isOn ? 90 : 35}%, ${particle.isOn ? 68 : 40}%, ${ringAlpha})`;
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+}
+
+function drawLightParticle(
+  ctx: CanvasRenderingContext2D,
+  particle: ReactorParticle,
+  scale: number,
+  timeMs: number
+): void {
+  const brightness = particle.lightBrightness;
+  const radius = scale * (0.008 + brightness * 0.024);
+  const alpha = particle.unavailable
+    ? 0.25
+    : particle.isOn
+      ? 0.22 + brightness * 0.72
+      : 0.18;
+  const color =
+    particle.lightColor ??
+    (particle.isOn
+      ? "rgb(255, 183, 77)"
+      : paletteColor(particle, timeMs, 0.25));
+
+  drawGlowDot(ctx, particle.x, particle.y, radius, withAlpha(color, alpha), alpha);
+}
+
+function drawTimerParticle(
+  ctx: CanvasRenderingContext2D,
+  particle: ReactorParticle,
+  scale: number,
+  timeMs: number
+): void {
+  const urgency = particle.timerUrgency;
+  const flashSpeed = 0.005 + urgency * 0.048;
+  const pulse = 0.42 + Math.sin(timeMs * flashSpeed + particle.seed * 10) * 0.38;
+  const alpha = particle.unavailable
+    ? 0.25
+    : Math.min(1, (0.28 + urgency * 0.35) * pulse + 0.2);
+  const radius = scale * (0.012 + urgency * 0.008);
+  const hue = pulseHue(particle.seed, timeMs);
+
+  drawGlowDot(
+    ctx,
+    particle.x,
+    particle.y,
+    radius,
+    `hsla(${hue}, 86%, ${58 + urgency * 12}%, ${alpha})`,
+    alpha
+  );
+
+  if (urgency > 0.05) {
+    const ringAlpha = alpha * 0.45 * pulse;
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, radius * 2.1, 0, TAU);
+    ctx.strokeStyle = `hsla(${hue}, 88%, 64%, ${ringAlpha})`;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+}
+
+function drawDefaultParticle(
+  ctx: CanvasRenderingContext2D,
+  particle: ReactorParticle,
+  scale: number,
+  timeMs: number
+): void {
+  const baseRadius =
+    particle.kind === "numeric"
+      ? scale * 0.011 + particle.numericNorm * scale * 0.007
+      : scale * 0.013;
+  const alpha = particle.unavailable ? 0.28 : 0.78;
+  const color = paletteColor(particle, timeMs, alpha);
+  drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha);
+}
+
+function withAlpha(color: string, alpha: number): string {
+  const rgb = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  if (rgb) {
+    return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${alpha})`;
+  }
+  const hsla = color.match(/hsla?\(([^)]+)\)/);
+  if (hsla) {
+    return color.replace(/[\d.]+\)$/, `${alpha})`);
+  }
+  return color;
 }
 
 function applyRepulsion(
@@ -433,6 +523,8 @@ export function updatePulses(
 
 export function updateParticles(
   particles: ReactorParticle[],
+  hass: HomeAssistant | undefined,
+  config: ReactorCoreCardConfig | undefined,
   width: number,
   height: number,
   delta: number,
@@ -440,9 +532,23 @@ export function updateParticles(
   reducedMotion: boolean
 ): void {
   const motion = reducedMotion ? 0.15 : 1;
+  const min = config?.min ?? DEFAULT_MIN;
+  const max = config?.max ?? DEFAULT_MAX;
+
+  if (hass) {
+    for (const particle of particles) {
+      if (particle.kind === "timer" || particle.kind === "light") {
+        applyVisualState(particle, hass, min, max);
+      }
+    }
+  }
 
   for (const particle of particles) {
-    particle.phase += particle.orbitSpeed * delta * motion;
+    particle.phase +=
+      particle.baseOrbitSpeed *
+      orbitSpeedMultiplier(particle) *
+      delta *
+      motion;
     placeParticle(particle, width, height, timeMs);
   }
 
@@ -491,22 +597,20 @@ export function drawReactor(
   drawPulses(ctx, pulses, scale, timeMs);
 
   for (const particle of particles) {
-    const baseRadius =
-      particle.kind === "binary"
-        ? scale * 0.022
-        : particle.kind === "numeric"
-          ? scale * 0.011 + particle.numericNorm * scale * 0.007
-          : scale * 0.013;
-
-    let alpha = particle.unavailable ? 0.28 : 0.78;
-    if (particle.kind === "binary") {
-      alpha = particle.binaryOn
-        ? 0.55 + Math.sin(timeMs * 0.012 + particle.seed * 12) * 0.35
-        : 0.35;
+    switch (particle.kind) {
+      case "toggle":
+        drawToggleParticle(ctx, particle, scale, timeMs);
+        break;
+      case "light":
+        drawLightParticle(ctx, particle, scale, timeMs);
+        break;
+      case "timer":
+        drawTimerParticle(ctx, particle, scale, timeMs);
+        break;
+      default:
+        drawDefaultParticle(ctx, particle, scale, timeMs);
+        break;
     }
-
-    const color = particleColor(particle, timeMs, alpha);
-    drawGlowDot(ctx, particle.x, particle.y, baseRadius, color, alpha);
   }
 
   const corePulse = 0.55 + Math.sin(timeMs * 0.0018) * 0.12;

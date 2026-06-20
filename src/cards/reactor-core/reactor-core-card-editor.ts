@@ -14,6 +14,7 @@ import {
   DEFAULT_MIN,
   DEFAULT_MODE,
   REACTOR_CORE_CARD_EDITOR_NAME,
+  REACTOR_ENTITY_DOMAINS,
 } from "./const";
 
 const BASE_SCHEMA: HaFormSchema[] = [
@@ -25,7 +26,7 @@ const BASE_SCHEMA: HaFormSchema[] = [
     selector: {
       select: {
         options: [
-          { value: "auto", label: "Auto-discover sensors" },
+          { value: "auto", label: "Auto-discover entities" },
           { value: "manual", label: "Manual entity list" },
         ],
       },
@@ -61,7 +62,7 @@ const MANUAL_SCHEMA: HaFormSchema[] = [
   {
     name: "entities",
     selector: {
-      entity: { multiple: true, domain: ["sensor", "binary_sensor"] },
+      entity: { multiple: true, domain: [...REACTOR_ENTITY_DOMAINS] },
     },
   },
 ];
@@ -117,11 +118,11 @@ export class NvisionReactorCoreCardEditor
     }
 
     if (schema.name === "min") {
-      return "Numeric trail min";
+      return "Numeric orbit min";
     }
 
     if (schema.name === "max") {
-      return "Numeric trail max";
+      return "Numeric orbit max";
     }
 
     return (

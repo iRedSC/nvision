@@ -20,6 +20,7 @@ import {
   DEFAULT_MODE,
   REACTOR_CORE_CARD_EDITOR_NAME,
   REACTOR_CORE_CARD_NAME,
+  REACTOR_ENTITY_DOMAINS,
 } from "./const";
 import {
   drawReactor,
@@ -65,7 +66,13 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
       seen.add(id);
 
       const domain = id.split(".", 1)[0];
-      if (domain === "sensor" || domain === "binary_sensor") {
+      if (
+        domain === "sensor" ||
+        domain === "binary_sensor" ||
+        domain === "switch" ||
+        domain === "light" ||
+        domain === "timer"
+      ) {
         picked.push(id);
       }
 
@@ -284,6 +291,8 @@ export class NvisionReactorCoreCard extends LitElement implements LovelaceCard {
     const reducedMotion = prefersReducedMotion();
     updateParticles(
       this._particles,
+      this.hass,
+      this._config,
       width,
       height,
       delta,
@@ -402,9 +411,7 @@ function discoverIds(
     return config.entities.filter((id) => Boolean(hass.states[id]));
   }
 
-  const domains = config.domains?.length
-    ? config.domains
-    : ["sensor", "binary_sensor"];
+  const domains = config.domains?.length ? config.domains : [...REACTOR_ENTITY_DOMAINS];
   const max = config.max_particles ?? DEFAULT_MAX_PARTICLES;
 
   return Object.keys(hass.states)
