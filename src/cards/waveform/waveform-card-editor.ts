@@ -9,7 +9,6 @@ import {
   DEFAULT_MAX,
   DEFAULT_MIN,
   DEFAULT_MOTION,
-  DEFAULT_SHAKE_AT,
   DEFAULT_SIZE,
   DEFAULT_SHAKE_SPEED,
   LAYOUT_OPTIONS,
@@ -80,22 +79,10 @@ const SCHEMA: HaFormSchema[] = [
     },
   },
   {
-    type: "grid",
-    name: "",
-    schema: [
-      {
-        name: "shake_at",
-        required: true,
-        default: DEFAULT_SHAKE_AT,
-        selector: { number: { min: 0.1, max: 0.95, step: 0.05 } },
-      },
-      {
-        name: "shake_speed",
-        required: true,
-        default: DEFAULT_SHAKE_SPEED,
-        selector: { number: { min: 0.15, max: 1.5, step: 0.05 } },
-      },
-    ],
+    name: "shake_speed",
+    required: true,
+    default: DEFAULT_SHAKE_SPEED,
+    selector: { number: { min: 0.15, max: 1.5, step: 0.05 } },
   },
 ];
 
@@ -113,7 +100,6 @@ export class NvisionWaveformCardEditor
       layout: DEFAULT_LAYOUT,
       size: DEFAULT_SIZE,
       motion: DEFAULT_MOTION,
-      shake_at: DEFAULT_SHAKE_AT,
       shake_speed: DEFAULT_SHAKE_SPEED,
       ...config,
     };
@@ -158,10 +144,6 @@ export class NvisionWaveformCardEditor
 
     if (schema.name === "motion") {
       return "Motion";
-    }
-
-    if (schema.name === "shake_at") {
-      return "Shake starts at";
     }
 
     if (schema.name === "shake_speed") {

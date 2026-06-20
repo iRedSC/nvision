@@ -90,13 +90,11 @@ function smoothstep(value: number): number {
 }
 
 function motionAmplitude(intensity: number, height: number): number {
-  if (intensity <= 0) {
-    return 0;
-  }
-
-  const spread = smoothstep(intensity);
-  const surge = Math.max(0, intensity - 0.5) ** 2;
-  return height * (spread * 0.22 + surge * 0.3);
+  const t = intensity;
+  const spread = smoothstep(t);
+  const surge = Math.max(0, t - 0.5) ** 2;
+  const lowBias = (1 - spread) * 0.1;
+  return height * (0.08 + lowBias + spread * 0.22 + surge * 0.3);
 }
 
 function motionFrequency(intensity: number): number {
@@ -455,16 +453,6 @@ export function computeDotDrawParams(
     presets.span,
     intensity
   );
-
-  if (intensity <= 0) {
-    return {
-      x: base.x,
-      y: base.y,
-      radiusMul: 0.55,
-      alphaMul: 0.42,
-    };
-  }
-
   const motionInput: MotionInput = {
     dot,
     index,

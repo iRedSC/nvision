@@ -69,15 +69,6 @@ function normalizeValue(value: number, min: number, max: number): number {
   return Math.min(1, Math.max(0, (value - min) / (max - min)));
 }
 
-/** Motion amplitude/speed only ramp in above the shake threshold. */
-function motionIntensity(raw: number, shakeAt: number): number {
-  if (raw <= shakeAt) {
-    return 0;
-  }
-
-  return (raw - shakeAt) / (1 - shakeAt);
-}
-
 @customElement(WAVEFORM_CARD_NAME)
 export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -187,20 +178,9 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
   disconnectedCallback(): void {
     this._stopAnimation();
     this._resizeObserver?.disconnect();
-    this._clearShakeTransform();
+    this.style.transform = "";
     this._shakePhase = 0;
     super.disconnectedCallback();
-  }
-
-  private _shakeTarget(): HTMLElement {
-    return this._stage ?? this;
-  }
-
-  private _clearShakeTransform(): void {
-    this.style.transform = "";
-    if (this._stage) {
-      this._stage.style.transform = "";
-    }
   }
 
   protected updated(changed: Map<string, unknown>): void {
@@ -310,14 +290,13 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
 
   private _applyShake(activity: number, shakePhase: number): void {
     const { shakeAt, shakePeak } = this._shakeThresholds();
-    const target = this._shakeTarget();
 
     if (activity < shakeAt) {
-      this._clearShakeTransform();
+      this.style.transform = "";
       return;
     }
 
-    const amount = motionIntensity(activity, shakeAt) * shakePeak;
+    const amount = ((activity - shakeAt) / (1 - shakeAt)) * shakePeak;
     const t = shakePhase;
     const x =
       Math.sin(t * 14.3) * amount * 2.4 +
@@ -327,7 +306,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
       Math.sin(t * 11.2) * amount * 0.9;
     const rot = Math.sin(t * 21.5) * amount * 0.4;
 
-    target.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg)`;
+    this.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg)`;
   }
 
   private _drawDot(
@@ -378,11 +357,11 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
     const rawIntensity = this._tickIntensity(delta);
     const { shakeAt, shakeSpeed } = this._shakeThresholds();
     const presets = this._presets();
-    const motion = motionIntensity(rawIntensity, shakeAt);
 
-    if (motion > 0) {
-      this._phase += delta * 0.04 * presets.phaseSpeed;
-    }
+    this._phase +=
+      delta *
+      (0.014 + rawIntensity * rawIntensity * 0.1) *
+      presets.phaseSpeed;
 
     if (rawIntensity >= shakeAt) {
       this._shakePhase += delta * shakeSpeed * 0.06;
@@ -406,7 +385,7 @@ export class NvisionWaveformCard extends LitElement implements LovelaceCard {
         i,
         this._dots.length,
         this._phase,
-        motion,
+        rawIntensity,
         width,
         height,
         0,
