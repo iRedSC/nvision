@@ -1,5 +1,6 @@
 import type { LovelaceCardConfig } from "../../types";
 import type { ConfigColor } from "../../utils/colors";
+import type { AggregateType } from "../../utils/history-data";
 import type { ActionConfig } from "../../utils/lovelace-actions";
 import type { HeatMapPreset } from "./const";
 
@@ -10,6 +11,8 @@ export interface HeatMapCardConfig extends LovelaceCardConfig {
   entity?: string;
   name?: string;
   preset?: HeatMapPreset;
+  /** Auto infers from the entity; explicit values override preset defaults. */
+  operation?: AggregateType | "auto";
   color_mode?: ColorMode;
   color_low?: ConfigColor;
   color_high?: ConfigColor;

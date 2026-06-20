@@ -9,6 +9,7 @@ import {
   DEFAULT_COLOR_MODE,
   DEFAULT_PRESET,
   HEAT_MAP_CARD_EDITOR_NAME,
+  OPERATION_OPTIONS,
   PRESET_OPTIONS,
 } from "./const";
 
@@ -22,6 +23,16 @@ const BASE_SCHEMA: HaFormSchema[] = [
     selector: {
       select: {
         options: [...PRESET_OPTIONS],
+        mode: "dropdown",
+      },
+    },
+  },
+  {
+    name: "operation",
+    default: "auto",
+    selector: {
+      select: {
+        options: [...OPERATION_OPTIONS],
         mode: "dropdown",
       },
     },
@@ -80,6 +91,7 @@ export class NvisionHeatMapCardEditor
       ...config,
       color_mode:
         config.color_mode === "primary" ? "theme" : config.color_mode,
+      operation: config.operation ?? "auto",
     };
   }
 
@@ -113,6 +125,10 @@ export class NvisionHeatMapCardEditor
 
     if (schema.name === "color_mode") {
       return "Color mode";
+    }
+
+    if (schema.name === "operation") {
+      return "Operation";
     }
 
     if (schema.name === "color_low") {

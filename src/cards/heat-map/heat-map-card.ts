@@ -236,6 +236,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       type: `custom:${HEAT_MAP_CARD_NAME}`,
       entity,
       preset: DEFAULT_PRESET,
+      operation: "auto",
       color_mode: DEFAULT_COLOR_MODE,
       show_axis_labels: true,
       show_legend: true,
@@ -278,6 +279,11 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
   }
 
   private _resolveAggregate(axes: ReturnType<typeof resolveAxes>): AggregateType {
+    const operation = this._config?.operation;
+    if (operation && operation !== "auto") {
+      return operation;
+    }
+
     const entity = this._config?.entity;
     const attributes = this._entityAttributes();
     return resolveBucketAggregate(
@@ -300,13 +306,9 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
     return JSON.stringify({
       entity: config.entity,
       preset: config.preset,
+      operation: config.operation ?? "auto",
       stateClass: attributes?.state_class,
-      aggregate: resolveBucketAggregate(
-        axes.x,
-        axes.y,
-        defaultAggregate(config.entity, attributes),
-        attributes
-      ),
+      aggregate: this._resolveAggregate(axes),
       axes,
     });
   }
@@ -314,6 +316,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
   public setConfig(config: HeatMapCardConfig): void {
     this._config = {
       preset: DEFAULT_PRESET,
+      operation: "auto",
       color_mode: DEFAULT_COLOR_MODE,
       show_axis_labels: true,
       show_legend: true,

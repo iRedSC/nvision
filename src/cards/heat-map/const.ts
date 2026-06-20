@@ -35,3 +35,13 @@ export const COLOR_MODE_OPTIONS = [
   { value: "temperature", label: "Temperature" },
   { value: "custom", label: "Custom" },
 ] as const;
+
+export const OPERATION_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "mean", label: "Mean" },
+  { value: "sum", label: "Sum" },
+  { value: "max", label: "Maximum" },
+  { value: "min", label: "Minimum" },
+  { value: "count", label: "Count" },
+  { value: "last", label: "Last" },
+] as const;
