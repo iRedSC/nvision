@@ -24,6 +24,7 @@ import {
 import {
   defaultAggregate,
   loadHistoryPoints,
+  resolveCallWS,
 } from "../../utils/history-data";
 import { handleLovelaceAction } from "../../utils/lovelace-actions";
 import { responsiveTypeStyles } from "../../utils/responsive-type";
@@ -139,6 +140,34 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
 
   private _fetchVersion = 0;
 
+  private _loadKey?: string;
+
+  private _computeLoadKey(): string {
+    const config = this._config;
+    if (!config?.entity) {
+      return "";
+    }
+
+    const axes = resolveAxes(
+      config.preset,
+      config.x_axis,
+      config.y_axis,
+      config.period
+    );
+
+    return JSON.stringify({
+      entity: config.entity,
+      preset: config.preset,
+      period: config.period,
+      x_axis: config.x_axis,
+      y_axis: config.y_axis,
+      aggregate: config.aggregate ?? defaultAggregate(config.entity),
+      min: config.min,
+      max: config.max,
+      axes,
+    });
+  }
+
   public setConfig(config: HeatMapCardConfig): void {
     this._config = {
       preset: DEFAULT_PRESET,
@@ -152,6 +181,7 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       ...config,
       aggregate: config.aggregate ?? defaultAggregate(config.entity),
     };
+    this._loadKey = undefined;
   }
 
   public getCardSize(): number {
@@ -169,9 +199,17 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
   }
 
   protected updated(changed: Map<string, unknown>): void {
-    if (changed.has("_config") || changed.has("hass")) {
-      void this._loadData();
+    if (!changed.has("_config") && !changed.has("hass")) {
+      return;
     }
+
+    const loadKey = this._computeLoadKey();
+    if (!loadKey || loadKey === this._loadKey) {
+      return;
+    }
+
+    this._loadKey = loadKey;
+    void this._loadData();
   }
 
   private async _loadData(): Promise<void> {
@@ -185,7 +223,9 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
       return;
     }
 
-    if (!hass.callWS) {
+    try {
+      resolveCallWS(hass);
+    } catch {
       this._error = "History unavailable";
       this._grid = undefined;
       return;
@@ -220,16 +260,17 @@ export class NvisionHeatMapCard extends LitElement implements LovelaceCard {
         axes.y,
         axes.period,
         aggregate,
-        hass.config.time_zone,
+        hass.config.time_zone || "UTC",
         firstWeekday(hass),
         config.min,
         config.max
       );
-    } catch {
+    } catch (error) {
       if (fetchVersion !== this._fetchVersion) {
         return;
       }
-      this._error = "Could not load history";
+      this._error =
+        error instanceof Error ? error.message : "Could not load history";
       this._grid = undefined;
     } finally {
       if (fetchVersion === this._fetchVersion) {

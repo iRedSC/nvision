@@ -27,11 +27,30 @@ type StatisticsResponse = Record<string, StatisticValue[]>;
 
 export type AggregateType = "mean" | "sum" | "max" | "min" | "count" | "last";
 
-function requireCallWS(hass: HomeAssistant) {
-  if (!hass.callWS) {
-    throw new Error("WebSocket API unavailable");
+export type CallWS = <T = unknown>(
+  message: Record<string, unknown>
+) => Promise<T>;
+
+export function resolveCallWS(hass: HomeAssistant): CallWS {
+  if (hass.callWS) {
+    return hass.callWS.bind(hass);
   }
-  return hass.callWS.bind(hass);
+
+  const connection = (
+    hass as HomeAssistant & {
+      connection?: { sendMessagePromise: CallWS };
+    }
+  ).connection;
+
+  if (connection?.sendMessagePromise) {
+    return connection.sendMessagePromise.bind(connection);
+  }
+
+  throw new Error("WebSocket API unavailable");
+}
+
+function requireCallWS(hass: HomeAssistant) {
+  return resolveCallWS(hass);
 }
 
 export function isBinaryEntity(entityId: string | undefined): boolean {
@@ -95,6 +114,10 @@ function statisticField(
   }
 }
 
+function toEpochMs(timestamp: number): number {
+  return timestamp < 1e11 ? timestamp * 1000 : timestamp;
+}
+
 function statisticsToPoints(
   values: StatisticValue[],
   aggregate: AggregateType
@@ -106,10 +129,20 @@ function statisticsToPoints(
     if (numeric === undefined || numeric === null || !Number.isFinite(numeric)) {
       continue;
     }
-    points.push({ time: value.start, value: numeric });
+    points.push({ time: toEpochMs(value.start), value: numeric });
   }
 
   return points;
+}
+
+function normalizeHistoryResponse(
+  response: Record<string, EntityHistoryState[]> | EntityHistoryState[][],
+  entityId: string
+): EntityHistoryState[] {
+  if (Array.isArray(response)) {
+    return response[0] ?? [];
+  }
+  return response[entityId] ?? [];
 }
 
 export async function fetchHistoryPoints(
@@ -120,7 +153,9 @@ export async function fetchHistoryPoints(
   binary: boolean
 ): Promise<HistoryPoint[]> {
   const callWS = requireCallWS(hass);
-  const response = await callWS<Record<string, EntityHistoryState[]>>({
+  const response = await callWS<
+    Record<string, EntityHistoryState[]> | EntityHistoryState[][]
+  >({
     type: "history/history_during_period",
     start_time: start.toISOString(),
     end_time: end.toISOString(),
@@ -129,7 +164,7 @@ export async function fetchHistoryPoints(
     no_attributes: true,
   });
 
-  return historyToPoints(response[entityId] ?? [], binary);
+  return historyToPoints(normalizeHistoryResponse(response, entityId), binary);
 }
 
 export async function fetchStatisticsPoints(

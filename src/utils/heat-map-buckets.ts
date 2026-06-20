@@ -84,7 +84,10 @@ function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function getZonedParts(timeMs: number, timeZone: string): ZonedParts {
+function getZonedPartsBasic(
+  timeMs: number,
+  timeZone: string
+): Omit<ZonedParts, "weekKey"> {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
@@ -106,9 +109,6 @@ function getZonedParts(timeMs: number, timeZone: string): ZonedParts {
   const day = Number(parts.day);
   const hour = Number(parts.hour) % 24;
   const dateKey = `${year}-${pad2(month)}-${pad2(day)}`;
-  const weekStart = startOfWeekMs(timeMs, timeZone, 0);
-  const weekParts = getZonedParts(weekStart, timeZone);
-  const weekKey = `${weekParts.year}-${pad2(weekParts.month)}-${pad2(weekParts.day)}`;
 
   return {
     year,
@@ -117,13 +117,34 @@ function getZonedParts(timeMs: number, timeZone: string): ZonedParts {
     hour,
     weekday,
     dateKey,
-    weekKey,
     monthKey: `${year}-${pad2(month)}`,
   };
 }
 
+function getWeekKey(
+  timeMs: number,
+  timeZone: string,
+  firstWeekday: number
+): string {
+  const weekStart = startOfWeekMs(timeMs, timeZone, firstWeekday);
+  const parts = getZonedPartsBasic(weekStart, timeZone);
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
+function getZonedParts(
+  timeMs: number,
+  timeZone: string,
+  firstWeekday = 0
+): ZonedParts {
+  const basic = getZonedPartsBasic(timeMs, timeZone);
+  return {
+    ...basic,
+    weekKey: getWeekKey(timeMs, timeZone, firstWeekday),
+  };
+}
+
 function startOfWeekMs(timeMs: number, timeZone: string, firstWeekday: number): number {
-  const parts = getZonedParts(timeMs, timeZone);
+  const parts = getZonedPartsBasic(timeMs, timeZone);
   const dayOffset = (parts.weekday - firstWeekday + 7) % 7;
   const dayStart = zonedTimeToUtcMs(
     parts.year,
@@ -181,17 +202,18 @@ function enumerateDays(
   timeZone: string
 ): { key: string; label: string }[] {
   const days: { key: string; label: string }[] = [];
+  const startParts = getZonedPartsBasic(window.startMs, timeZone);
   let cursor = zonedTimeToUtcMs(
-    getZonedParts(window.startMs, timeZone).year,
-    getZonedParts(window.startMs, timeZone).month,
-    getZonedParts(window.startMs, timeZone).day,
+    startParts.year,
+    startParts.month,
+    startParts.day,
     0,
     0,
     timeZone
   );
 
   while (cursor <= window.endMs) {
-    const parts = getZonedParts(cursor, timeZone);
+    const parts = getZonedPartsBasic(cursor, timeZone);
     days.push({
       key: parts.dateKey,
       label: `${parts.month}/${parts.day}`,
@@ -211,7 +233,7 @@ function enumerateWeeks(
   let cursor = startOfWeekMs(window.startMs, timeZone, firstWeekday);
 
   while (cursor <= window.endMs) {
-    const parts = getZonedParts(cursor, timeZone);
+    const parts = getZonedPartsBasic(cursor, timeZone);
     weeks.push({
       key: parts.weekKey,
       label: `${parts.month}/${parts.day}`,
@@ -227,7 +249,7 @@ function enumerateMonths(
   timeZone: string
 ): { key: string; label: string }[] {
   const months: { key: string; label: string }[] = [];
-  const startParts = getZonedParts(window.startMs, timeZone);
+  const startParts = getZonedPartsBasic(window.startMs, timeZone);
   let year = startParts.year;
   let month = startParts.month;
 
@@ -288,13 +310,14 @@ function axisKey(
   field: AxisField,
   timeMs: number,
   timeZone: string,
-  bucketMs: number
+  bucketMs: number,
+  firstWeekday: number
 ): string | undefined {
   if (field === "none") {
     return "";
   }
 
-  const parts = getZonedParts(timeMs, timeZone);
+  const parts = getZonedParts(timeMs, timeZone, firstWeekday);
 
   switch (field) {
     case "hour":
@@ -481,8 +504,8 @@ export function buildHeatMapGrid(
       continue;
     }
 
-    const xKey = axisKey(xField, point.time, timeZone, bucketMs);
-    const yKey = axisKey(yField, point.time, timeZone, bucketMs);
+    const xKey = axisKey(xField, point.time, timeZone, bucketMs, firstWeekday);
+    const yKey = axisKey(yField, point.time, timeZone, bucketMs, firstWeekday);
     if (xKey === undefined || yKey === undefined) {
       continue;
     }
