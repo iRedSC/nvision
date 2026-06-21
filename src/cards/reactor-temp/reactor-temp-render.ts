@@ -1,4 +1,3 @@
-import { reactorHeatRgb } from "../../utils/colors";
 import type { ReactorDirection } from "./reactor-temp-state";
 
 export interface ReactorTempDrawState {
@@ -312,28 +311,51 @@ function drawReactorRing(
   ctx.restore();
 }
 
+function vignetteHeatRgb(tempNorm: number): [number, number, number] {
+  const heat = smoothstep(tempNorm);
+
+  if (heat < 0.32) {
+    return mixRgb(PLASMA[0], PLASMA[2], heat / 0.32);
+  }
+
+  if (heat < 0.62) {
+    return mixRgb(PLASMA[2], PLASMA[4], (heat - 0.32) / 0.3);
+  }
+
+  return mixRgb(PLASMA[4], PLASMA[5], (heat - 0.62) / 0.38);
+}
+
 function vignetteColor(
   direction: ReactorDirection,
   tempNorm: number,
-  hasSetpoint: boolean
+  hasSetpoint: boolean,
+  directionStrength: number
 ): [number, number, number] {
+  const base = vignetteHeatRgb(tempNorm);
+
   if (!hasSetpoint) {
-    return reactorHeatRgb(tempNorm);
+    return base;
   }
 
   if (direction === "heating") {
-    return reactorHeatRgb(0.62);
+    return mixRgb(
+      base,
+      mixRgb(PLASMA[4], PLASMA[8], 0.45),
+      0.16 + directionStrength * 0.24
+    );
   }
 
   if (direction === "cooling") {
-    return reactorHeatRgb(0.1);
+    const coolTint = mixRgb(PLASMA[1], PLASMA[2], 0.55);
+    const pull = Math.min(0.38, directionStrength * (1 - tempNorm * 0.85));
+    return mixRgb(base, coolTint, pull);
   }
 
   if (direction === "off") {
-    return reactorHeatRgb(tempNorm * 0.25);
+    return mixRgb(base, vignetteHeatRgb(tempNorm * 0.35), 0.12);
   }
 
-  return reactorHeatRgb(tempNorm * 0.38);
+  return base;
 }
 
 function drawVignette(
@@ -346,19 +368,19 @@ function drawVignette(
   const cx = width / 2;
   const cy = height / 2;
   const radius = Math.hypot(cx, cy) * 1.08;
-  const opacity = 0.28 + strength * 0.42;
+  const opacity = 0.32 + strength * 0.48;
   const gradient = ctx.createRadialGradient(
     cx,
     cy,
-    radius * 0.34,
+    radius * 0.28,
     cx,
     cy,
     radius
   );
 
   gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
-  gradient.addColorStop(0.58, rgba(rgb, opacity * 0.18));
-  gradient.addColorStop(1, rgba(rgb, opacity * 0.72));
+  gradient.addColorStop(0.52, rgba(rgb, opacity * 0.22));
+  gradient.addColorStop(1, rgba(rgb, opacity * 0.82));
 
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
@@ -563,13 +585,21 @@ export function drawReactorTemp(
   ctx.clearRect(0, 0, width, height);
 
   const vignetteStrength = state.hasSetpoint
-    ? Math.max(state.directionStrength, state.tempNorm * 0.25)
-    : 0.16 + state.tempNorm * 0.64;
+    ? Math.max(
+        state.directionStrength * 0.45 + state.tempNorm * 0.42,
+        state.tempNorm * 0.38
+      )
+    : 0.18 + state.tempNorm * 0.68;
   drawVignette(
     ctx,
     width,
     height,
-    vignetteColor(state.direction, state.tempNorm, state.hasSetpoint),
+    vignetteColor(
+      state.direction,
+      state.tempNorm,
+      state.hasSetpoint,
+      state.directionStrength
+    ),
     vignetteStrength
   );
 
