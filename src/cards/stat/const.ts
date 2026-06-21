@@ -2,12 +2,21 @@ export const STAT_CARD_NAME = "nvision-stat-card";
 export const STAT_CARD_EDITOR_NAME = "nvision-stat-card-editor";
 
 export const DEFAULT_TREND_PERIOD = 24;
+export const DEFAULT_GRAPH_HEIGHT = 80;
+export const DEFAULT_GRAPH_STYLE = "line" as const;
 
 export const TREND_PERIOD_OPTIONS = [
   { value: "1", label: "1 hour" },
   { value: "24", label: "24 hours" },
   { value: "168", label: "7 days" },
   { value: "720", label: "30 days" },
+] as const;
+
+export const GRAPH_STYLE_OPTIONS = [
+  { value: "line", label: "Line" },
+  { value: "area", label: "Area" },
+  { value: "bar", label: "Bar" },
+  { value: "none", label: "None" },
 ] as const;
 
 export const TREND_PERIOD_LABELS: Record<number, string> = {

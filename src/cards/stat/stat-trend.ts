@@ -1,6 +1,5 @@
 import {
   defaultAggregate,
-  loadHistoryPoints,
   type AggregateType,
 } from "../../utils/history-data";
 import type { HomeAssistant } from "../../types";
@@ -112,27 +111,6 @@ export function readTrendFromEntity(
   }
 
   return { percent: value };
-}
-
-export async function loadPastValue(
-  hass: HomeAssistant,
-  entityId: string,
-  periodHours: number,
-  aggregate: AggregateType
-): Promise<number | undefined> {
-  const points = await loadHistoryPoints(
-    hass,
-    entityId,
-    periodHours,
-    aggregate
-  );
-
-  if (!points.length) {
-    return undefined;
-  }
-
-  points.sort((a, b) => a.time - b.time);
-  return points[0]?.value;
 }
 
 export function resolveAggregate(

@@ -1,5 +1,5 @@
 import { css, html, LitElement, nothing } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, property, query, state } from "lit/decorators.js";
 import { styleMap } from "lit/directives/style-map.js";
 import type {
   HomeAssistant,
@@ -12,25 +12,32 @@ import {
   ActionHandlers,
   moreInfoInteractions,
 } from "../../utils/action-handlers";
+import { readCssColor, resolveThemeColor } from "../../utils/colors";
 import { formatStateWithUnit } from "../../utils/entity-state";
-import { resolveCallWS } from "../../utils/history-data";
+import {
+  loadHistoryPoints,
+  resolveCallWS,
+  type HistoryPoint,
+} from "../../utils/history-data";
 import { parseNumericState } from "../../utils/power-lightning";
 import {
   responsiveStateIconStyles,
   responsiveTypeStyles,
 } from "../../utils/responsive-type";
 import {
+  DEFAULT_GRAPH_HEIGHT,
+  DEFAULT_GRAPH_STYLE,
   DEFAULT_TREND_PERIOD,
   STAT_CARD_EDITOR_NAME,
   STAT_CARD_NAME,
   trendPeriodLabel,
 } from "./const";
-import type { StatCardConfig } from "./stat-card-config";
+import type { GraphStyle, StatCardConfig } from "./stat-card-config";
+import { drawStatGraph } from "./stat-graph";
 import {
   buildTrendDisplay,
   computeTrendResult,
   formatComparedValue,
-  loadPastValue,
   readTrendFromEntity,
   resolveAggregate,
   type TrendColorTone,
@@ -40,7 +47,7 @@ import {
 registerCustomCard({
   type: STAT_CARD_NAME,
   name: "Nvision Stat",
-  description: "Numeric value with a colored trend percentage",
+  description: "Sensor-style value, trend, and history graph",
 });
 
 const TREND_ICONS: Record<TrendDirection, string> = {
@@ -69,6 +76,8 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
           type: `custom:${STAT_CARD_NAME}`,
           entity: entityId,
           trend_period: DEFAULT_TREND_PERIOD,
+          graph: DEFAULT_GRAPH_STYLE,
+          graph_height: DEFAULT_GRAPH_HEIGHT,
         };
       }
     }
@@ -77,6 +86,8 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
       type: `custom:${STAT_CARD_NAME}`,
       entity: pool[0] ?? "sensor.temperature",
       trend_period: DEFAULT_TREND_PERIOD,
+      graph: DEFAULT_GRAPH_STYLE,
+      graph_height: DEFAULT_GRAPH_HEIGHT,
     };
   }
 
@@ -84,11 +95,19 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: StatCardConfig;
 
-  @state() private _pastValue?: number;
+  @state() private _historyPoints: HistoryPoint[] = [];
+
+  @query("canvas") private _canvas?: HTMLCanvasElement;
 
   private _loadKey?: string;
 
   private _fetchVersion = 0;
+
+  private _resizeObserver?: ResizeObserver;
+
+  private _observedWrap?: Element;
+
+  private _drawFrame = 0;
 
   private _actions = new ActionHandlers(
     () => this,
@@ -100,17 +119,41 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     this._config = {
       show_icon: true,
       trend_period: DEFAULT_TREND_PERIOD,
+      graph: DEFAULT_GRAPH_STYLE,
+      graph_height: DEFAULT_GRAPH_HEIGHT,
+      smoothing: true,
       ...moreInfoInteractions(),
       ...config,
     };
   }
 
   public getCardSize(): number {
-    return 1;
+    const graph = this._config?.graph ?? DEFAULT_GRAPH_STYLE;
+    return graph === "none" ? 1 : 2;
   }
 
   public getGridOptions(): LovelaceGridOptions {
-    return { columns: 6, rows: 1 };
+    const graph = this._config?.graph ?? DEFAULT_GRAPH_STYLE;
+    if (graph === "none") {
+      return { columns: 6, rows: 1 };
+    }
+
+    return {
+      columns: 6,
+      rows: 2,
+      min_rows: 2,
+    };
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    this._resizeObserver = new ResizeObserver(() => this._scheduleDraw());
+  }
+
+  disconnectedCallback(): void {
+    this._resizeObserver?.disconnect();
+    cancelAnimationFrame(this._drawFrame);
+    super.disconnectedCallback();
   }
 
   protected updated(changed: Map<string, unknown>): void {
@@ -118,26 +161,82 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
       const loadKey = this._computeLoadKey();
       if (loadKey !== this._loadKey) {
         this._loadKey = loadKey;
-        void this._loadPastValue();
+        void this._loadHistory();
       }
     }
+
+    if (
+      changed.has("_historyPoints") ||
+      changed.has("_config") ||
+      changed.has("hass")
+    ) {
+      this._observeGraphWrap();
+      this._scheduleDraw();
+    }
+  }
+
+  private _observeGraphWrap(): void {
+    const wrap = this.shadowRoot?.querySelector(".graph-wrap");
+    if (!wrap || !this._resizeObserver || wrap === this._observedWrap) {
+      return;
+    }
+
+    if (this._observedWrap) {
+      this._resizeObserver.unobserve(this._observedWrap);
+    }
+
+    this._observedWrap = wrap;
+    this._resizeObserver.observe(wrap);
   }
 
   private _computeLoadKey(): string | undefined {
     const config = this._config;
-    if (!config?.entity || config.trend_entity) {
-      return config?.trend_entity ? "external" : undefined;
+    if (!config?.entity) {
+      return undefined;
     }
 
-    return `${config.entity}:${config.trend_period ?? DEFAULT_TREND_PERIOD}`;
+    const graphPeriod =
+      config.graph_period ?? config.trend_period ?? DEFAULT_TREND_PERIOD;
+    const trendPeriod = config.trend_period ?? DEFAULT_TREND_PERIOD;
+
+    return `${config.entity}:${graphPeriod}:${trendPeriod}:${config.graph ?? DEFAULT_GRAPH_STYLE}`;
   }
 
-  private async _loadPastValue(): Promise<void> {
+  private _resolveGraphPeriod(): number {
+    return (
+      this._config?.graph_period ??
+      this._config?.trend_period ??
+      DEFAULT_TREND_PERIOD
+    );
+  }
+
+  private _resolveTrendPeriod(): number {
+    return this._config?.trend_period ?? DEFAULT_TREND_PERIOD;
+  }
+
+  private _pastValueForTrend(): number | undefined {
+    if (!this._historyPoints.length) {
+      return undefined;
+    }
+
+    const trendPeriodHours = this._resolveTrendPeriod();
+    const graphPeriodHours = this._resolveGraphPeriod();
+    const sorted = [...this._historyPoints].sort((a, b) => a.time - b.time);
+
+    if (trendPeriodHours <= graphPeriodHours) {
+      return sorted[0]?.value;
+    }
+
+    const cutoff = Date.now() - trendPeriodHours * 60 * 60 * 1000;
+    return sorted.find((point) => point.time >= cutoff)?.value ?? sorted[0]?.value;
+  }
+
+  private async _loadHistory(): Promise<void> {
     const config = this._config;
     const hass = this.hass;
 
-    if (!config?.entity || config.trend_entity) {
-      this._pastValue = undefined;
+    if (!config?.entity) {
+      this._historyPoints = [];
       return;
     }
 
@@ -148,16 +247,19 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     try {
       resolveCallWS(hass);
     } catch {
-      this._pastValue = undefined;
+      this._historyPoints = [];
       return;
     }
 
     const fetchVersion = ++this._fetchVersion;
-    const periodHours = config.trend_period ?? DEFAULT_TREND_PERIOD;
+    const periodHours = Math.max(
+      this._resolveGraphPeriod(),
+      this._resolveTrendPeriod()
+    );
     const aggregate = resolveAggregate(hass, config.entity);
 
     try {
-      const past = await loadPastValue(
+      const points = await loadHistoryPoints(
         hass,
         config.entity,
         periodHours,
@@ -168,13 +270,61 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
         return;
       }
 
-      this._pastValue = past;
+      this._historyPoints = points;
     } catch {
       if (fetchVersion !== this._fetchVersion) {
         return;
       }
-      this._pastValue = undefined;
+      this._historyPoints = [];
     }
+  }
+
+  private _scheduleDraw(): void {
+    cancelAnimationFrame(this._drawFrame);
+    this._drawFrame = requestAnimationFrame(() => this._drawGraph());
+  }
+
+  private _graphStyle(): GraphStyle {
+    return this._config?.graph ?? DEFAULT_GRAPH_STYLE;
+  }
+
+  private _graphHeight(): number {
+    return this._config?.graph_height ?? DEFAULT_GRAPH_HEIGHT;
+  }
+
+  private _showFill(): boolean {
+    const style = this._graphStyle();
+    if (style === "area") {
+      return true;
+    }
+    if (style === "line") {
+      return this._config?.show_fill === true;
+    }
+    return false;
+  }
+
+  private _drawGraph(): void {
+    const canvas = this._canvas;
+    const config = this._config;
+    if (!canvas || !config || this._graphStyle() === "none") {
+      return;
+    }
+
+    const graphPeriodMs = this._resolveGraphPeriod() * 60 * 60 * 1000;
+    const cutoff = Date.now() - graphPeriodMs;
+    const points = this._historyPoints.filter((point) => point.time >= cutoff);
+
+    drawStatGraph(canvas, points, {
+      style: this._graphStyle(),
+      smoothing: config.smoothing !== false,
+      showFill: this._showFill(),
+      lineColor: resolveThemeColor(
+        config.line_color,
+        this,
+        "--primary-color",
+        readCssColor(this, "--primary-color", "#03a9f4")
+      ),
+    });
   }
 
   private _trendColor(tone: TrendColorTone): string {
@@ -200,10 +350,13 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
       "Stat";
 
     const valueText = formatStateWithUnit(stateObj);
+    const pastValue = this._config.trend_entity
+      ? undefined
+      : this._pastValueForTrend();
 
     const trendResult = this._config.trend_entity
       ? readTrendFromEntity(this.hass, this._config.trend_entity)
-      : computeTrendResult(current, this._pastValue);
+      : computeTrendResult(current, pastValue);
 
     const trend = buildTrendDisplay(
       trendResult,
@@ -213,18 +366,20 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     const showTrend = trend.text !== "—";
     const usingHistoryTrend = !this._config.trend_entity;
     const compareValue =
-      usingHistoryTrend && this._pastValue !== undefined
-        ? formatComparedValue(this.hass, this._pastValue, stateObj)
+      usingHistoryTrend && pastValue !== undefined
+        ? formatComparedValue(this.hass, pastValue, stateObj)
         : undefined;
     const comparePeriod = usingHistoryTrend
-      ? trendPeriodLabel(this._config.trend_period ?? DEFAULT_TREND_PERIOD)
+      ? trendPeriodLabel(this._resolveTrendPeriod())
       : undefined;
     const showCompare = compareValue !== undefined && compareValue !== "—";
+    const showGraph = this._graphStyle() !== "none";
+    const graphHeight = this._graphHeight();
 
     return html`
       <ha-card>
         <div
-          class="content"
+          class="stage"
           role="button"
           tabindex="0"
           @click=${this._actions.bind().click}
@@ -235,38 +390,54 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
           @pointerleave=${this._actions.bind().pointerleave}
           @pointercancel=${this._actions.bind().pointercancel}
         >
-          ${this._config.show_icon !== false && stateObj
-            ? html`<ha-state-icon
-                .hass=${this.hass}
-                .stateObj=${stateObj}
-              ></ha-state-icon>`
-            : nothing}
-          <div class="info">
-            <div class="label">${primary}</div>
-            <div class="value-row">
-              <span class="value">${valueText}</span>
-              ${showTrend
-                ? html`
-                    <span
-                      class="trend trend-${trend.direction}"
-                      style=${styleMap({ "--trend-color": trendColor })}
-                    >
-                      <ha-icon icon=${TREND_ICONS[trend.direction]}></ha-icon>
-                      ${trend.text}
-                    </span>
-                  `
+          <div class="header">
+            <div class="identity">
+              ${this._config.show_icon !== false && stateObj
+                ? html`<ha-state-icon
+                    .hass=${this.hass}
+                    .stateObj=${stateObj}
+                  ></ha-state-icon>`
                 : nothing}
+              <div class="identity-text">
+                <div class="label">${primary}</div>
+                ${showCompare
+                  ? html`
+                      <div class="compare-row">
+                        <span class="compare-value">${compareValue}</span>
+                        <span class="compare-sep">·</span>
+                        <span class="compare-period">${comparePeriod}</span>
+                      </div>
+                    `
+                  : nothing}
+              </div>
             </div>
-            ${showCompare
-              ? html`
-                  <div class="compare-row">
-                    <span class="compare-value">${compareValue}</span>
-                    <span class="compare-sep">·</span>
-                    <span class="compare-period">${comparePeriod}</span>
-                  </div>
-                `
-              : nothing}
+            <div class="metrics">
+              <div class="value-row">
+                <span class="value">${valueText}</span>
+                ${showTrend
+                  ? html`
+                      <span
+                        class="trend trend-${trend.direction}"
+                        style=${styleMap({ "--trend-color": trendColor })}
+                      >
+                        <ha-icon icon=${TREND_ICONS[trend.direction]}></ha-icon>
+                        ${trend.text}
+                      </span>
+                    `
+                  : nothing}
+              </div>
+            </div>
           </div>
+          ${showGraph
+            ? html`
+                <div
+                  class="graph-wrap"
+                  style=${styleMap({ height: `${graphHeight}px` })}
+                >
+                  <canvas aria-hidden="true"></canvas>
+                </div>
+              `
+            : nothing}
         </div>
       </ha-card>
     `;
@@ -278,7 +449,7 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     css`
       :host {
         --tile-color: var(--state-inactive-color);
-        --nv-stat-scale: 1.35;
+        --nv-stat-scale: 1.2;
         --nv-stat-value-font-size: calc(
           var(--nv-value-font-size) * var(--nv-stat-scale)
         );
@@ -293,25 +464,39 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
         height: 100%;
       }
 
-      .content {
+      .stage {
         display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 10px;
-        box-sizing: border-box;
+        flex-direction: column;
         height: 100%;
-        min-height: 64px;
+        min-height: 72px;
         cursor: pointer;
+      }
+
+      .header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px 8px;
+        box-sizing: border-box;
+      }
+
+      .identity {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
       }
 
       ha-state-icon {
         flex: none;
         color: var(--primary-text-color);
+        margin-top: 1px;
       }
 
-      .info {
+      .identity-text {
         min-width: 0;
-        flex: 1;
         display: flex;
         flex-direction: column;
         gap: 2px;
@@ -325,12 +510,17 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
         white-space: nowrap;
       }
 
+      .metrics {
+        flex: none;
+        text-align: right;
+      }
+
       .value-row {
         display: flex;
         align-items: baseline;
+        justify-content: flex-end;
         flex-wrap: wrap;
         gap: 6px;
-        min-width: 0;
       }
 
       .value {
@@ -377,6 +567,20 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
 
       .compare-sep {
         opacity: 0.8;
+      }
+
+      .graph-wrap {
+        flex: 1 1 auto;
+        min-height: 40px;
+        width: 100%;
+        padding: 0 4px 6px;
+        box-sizing: border-box;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
       }
     `,
   ];

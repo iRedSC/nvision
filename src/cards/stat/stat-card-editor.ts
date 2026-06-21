@@ -8,7 +8,10 @@ import {
   interactionEditorSchema,
 } from "../../utils/interaction-schema";
 import {
+  DEFAULT_GRAPH_HEIGHT,
+  DEFAULT_GRAPH_STYLE,
   DEFAULT_TREND_PERIOD,
+  GRAPH_STYLE_OPTIONS,
   STAT_CARD_EDITOR_NAME,
   TREND_PERIOD_OPTIONS,
 } from "./const";
@@ -18,6 +21,34 @@ const SCHEMA: HaFormSchema[] = [
   { name: "entity", selector: { entity: {} } },
   { name: "name", selector: { text: {} } },
   { name: "show_icon", default: true, selector: { boolean: {} } },
+  {
+    name: "graph",
+    default: DEFAULT_GRAPH_STYLE,
+    selector: {
+      select: {
+        options: [...GRAPH_STYLE_OPTIONS],
+        mode: "dropdown",
+      },
+    },
+  },
+  {
+    name: "graph_period",
+    default: String(DEFAULT_TREND_PERIOD),
+    selector: {
+      select: {
+        options: [...TREND_PERIOD_OPTIONS],
+        mode: "dropdown",
+      },
+    },
+  },
+  {
+    name: "graph_height",
+    default: DEFAULT_GRAPH_HEIGHT,
+    selector: { number: { min: 40, max: 240, step: 4, unit_of_measurement: "px" } },
+  },
+  { name: "smoothing", default: true, selector: { boolean: {} } },
+  { name: "show_fill", selector: { boolean: {} } },
+  { name: "line_color", selector: { color_rgb: {} } },
   { name: "trend_entity", selector: { entity: {} } },
   {
     name: "trend_period",
@@ -59,6 +90,30 @@ export class NvisionStatCardEditor
       return "Show icon";
     }
 
+    if (schema.name === "graph") {
+      return "Graph style";
+    }
+
+    if (schema.name === "graph_period") {
+      return "Graph period";
+    }
+
+    if (schema.name === "graph_height") {
+      return "Graph height";
+    }
+
+    if (schema.name === "smoothing") {
+      return "Smooth line";
+    }
+
+    if (schema.name === "show_fill") {
+      return "Fill under line";
+    }
+
+    if (schema.name === "line_color") {
+      return "Line color";
+    }
+
     if (schema.name === "trend_entity") {
       return "Trend entity (optional)";
     }
@@ -89,6 +144,12 @@ export class NvisionStatCardEditor
         .hass=${this.hass}
         .data=${{
           ...this._config,
+          graph: this._config.graph ?? DEFAULT_GRAPH_STYLE,
+          graph_period: String(
+            this._config.graph_period ??
+              this._config.trend_period ??
+              DEFAULT_TREND_PERIOD
+          ),
           trend_period: String(
             this._config.trend_period ?? DEFAULT_TREND_PERIOD
           ),
@@ -102,6 +163,9 @@ export class NvisionStatCardEditor
 
   private _valueChanged(ev: CustomEvent): void {
     const value = { ...ev.detail.value };
+    if (value.graph_period !== undefined) {
+      value.graph_period = Number(value.graph_period);
+    }
     if (value.trend_period !== undefined) {
       value.trend_period = Number(value.trend_period);
     }
