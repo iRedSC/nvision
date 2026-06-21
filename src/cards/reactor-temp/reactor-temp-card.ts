@@ -26,6 +26,8 @@ import {
   REACTOR_TEMP_CARD_EDITOR_NAME,
   REACTOR_TEMP_CARD_NAME,
   TEMP_LERP,
+  MOTION_LERP,
+  ANIM_PHASE_SPEED,
 } from "./const";
 import { drawReactorTemp } from "./reactor-temp-render";
 import {
@@ -101,8 +103,6 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
 
   @state() private _config?: ReactorTempCardConfig;
 
-  @state() private _displayNorm = 0.35;
-
   @state() private _previewTarget?: number;
 
   @query(".stage") private _stage?: HTMLElement;
@@ -114,6 +114,9 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
   private _animating = false;
   private _lastFrame = 0;
   private _targetNorm = 0.35;
+  private _displayNorm = 0.35;
+  private _motionNorm = 0.35;
+  private _animPhase = 0;
   private _resizeObserver?: ResizeObserver;
   private _dragPointerId?: number;
   private _dragOriginX = 0;
@@ -138,6 +141,7 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
     };
     this._previewTarget = undefined;
     this._syncTargetNorm();
+    this._motionNorm = this._targetNorm;
   }
 
   public getCardSize(): number {
@@ -257,7 +261,7 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
     this._ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  private _tickNorm(delta: number): number {
+  private _tickNorm(delta: number): void {
     const diff = this._targetNorm - this._displayNorm;
     if (Math.abs(diff) < 0.001) {
       this._displayNorm = this._targetNorm;
@@ -265,7 +269,15 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
       this._displayNorm += diff * TEMP_LERP * delta;
     }
 
-    return this._displayNorm;
+    const motionDiff = this._displayNorm - this._motionNorm;
+    if (Math.abs(motionDiff) < 0.001) {
+      this._motionNorm = this._displayNorm;
+    } else {
+      this._motionNorm += motionDiff * MOTION_LERP * delta;
+    }
+
+    this._animPhase +=
+      delta * (ANIM_PHASE_SPEED + this._motionNorm * 0.048);
   }
 
   private _draw(delta: number, timeMs: number): void {
@@ -282,14 +294,18 @@ export class NvisionReactorTempCard extends LitElement implements LovelaceCard {
     }
 
     const reading = this._reading();
-    const tempNorm = this._tickNorm(delta);
-    const ice = tempNorm < 0.18 ? (0.18 - tempNorm) / 0.18 : 0;
+    this._tickNorm(delta);
+    const ice =
+      this._displayNorm < 0.18 ? (0.18 - this._displayNorm) / 0.18 : 0;
 
     drawReactorTemp(ctx, {
       width,
       height,
       timeMs,
-      tempNorm,
+      animPhase: this._animPhase,
+      tempNorm: this._displayNorm,
+      motionNorm: this._motionNorm,
+      hasSetpoint: reading?.target !== undefined,
       direction: reading?.direction ?? "unknown",
       directionStrength: reading?.directionStrength ?? 0,
       ice,

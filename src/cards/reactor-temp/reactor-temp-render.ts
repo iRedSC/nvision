@@ -5,7 +5,10 @@ export interface ReactorTempDrawState {
   width: number;
   height: number;
   timeMs: number;
+  animPhase: number;
   tempNorm: number;
+  motionNorm: number;
+  hasSetpoint: boolean;
   direction: ReactorDirection;
   directionStrength: number;
   ice: number;
@@ -311,8 +314,13 @@ function drawReactorRing(
 
 function vignetteColor(
   direction: ReactorDirection,
-  tempNorm: number
+  tempNorm: number,
+  hasSetpoint: boolean
 ): [number, number, number] {
+  if (!hasSetpoint) {
+    return reactorHeatRgb(tempNorm);
+  }
+
   if (direction === "heating") {
     return reactorHeatRgb(0.62);
   }
@@ -423,23 +431,25 @@ function drawCore(
   width: number,
   height: number,
   tempNorm: number,
-  timeMs: number,
+  motionNorm: number,
+  animPhase: number,
   reducedMotion: boolean
 ): void {
   const cx = width / 2;
   const cy = height / 2;
   const base = Math.min(width, height);
   const heat = smoothstep(tempNorm);
+  const motionHeat = smoothstep(motionNorm);
   const critical = criticalLevel(tempNorm);
-  const baseRadius = base * (0.22 + heat * 0.12);
-  const phase = reducedMotion
-    ? 0
-    : timeMs * (0.00055 + heat * 0.001 + critical * 0.0028);
-  const ringWrithe = 0.1 + heat * 0.18 + critical * critical * 0.82;
-  const orbSpread = 0.06 + (1 - heat) * 0.18;
-  const churn = baseRadius * (0.035 + critical * 0.055);
-  const breathe = 1 + Math.sin(phase * 2.3) * (0.018 + critical * 0.035);
-  const clipWrithe = ringWrithe * (0.55 + (1 - critical) * 0.25);
+  const motionCritical = criticalLevel(motionNorm);
+  const baseRadius = base * (0.22 + motionHeat * 0.12);
+  const phase = reducedMotion ? 0 : animPhase;
+  const ringWrithe =
+    0.1 + motionHeat * 0.18 + motionCritical * motionCritical * 0.82;
+  const orbSpread = 0.06 + (1 - motionHeat) * 0.18;
+  const churn = baseRadius * (0.035 + motionCritical * 0.055);
+  const breathe = 1 + Math.sin(phase * 2.3) * (0.018 + motionCritical * 0.035);
+  const clipWrithe = ringWrithe * (0.55 + (1 - motionCritical) * 0.25);
   const heatRadiance = heat * 0.42 + critical * 0.68;
 
   drawAmbientHeatGlow(
@@ -468,7 +478,7 @@ function drawCore(
     ctx,
     cx + Math.sin(phase * 1.4) * churn * 0.35,
     cy + Math.cos(phase * 1.2) * churn * 0.35,
-    baseRadius * (0.64 + heat * 0.05),
+    baseRadius * (0.64 + motionHeat * 0.05),
     orbColor(tempNorm, 0, phase),
     0.15 + heat * 0.14
   );
@@ -477,7 +487,7 @@ function drawCore(
     const seed = index * 2.399963;
     const orbitRadius =
       baseRadius * orbSpread * (0.42 + fract(seed) * 0.58);
-    const orbitSpeed = 0.5 + index * 0.11 + critical * 0.75;
+    const orbitSpeed = 0.5 + index * 0.11 + motionCritical * 0.75;
     const angle = phase * orbitSpeed + seed * Math.PI * 2;
     const x =
       cx +
@@ -487,7 +497,7 @@ function drawCore(
       cy +
       Math.sin(angle * 1.07) * orbitRadius +
       Math.sin(angle * 1.85 + phase * 1.1) * churn;
-    const blobRadius = baseRadius * orbSizeScale(heat, seed);
+    const blobRadius = baseRadius * orbSizeScale(motionHeat, seed);
     const alpha = 0.11 + heat * 0.1 + fract(seed) * 0.04;
     const orbRgb = orbColor(tempNorm, index + 1, phase);
 
@@ -523,10 +533,10 @@ function drawCore(
     phase,
     ringWrithe,
     tempNorm,
-    critical
+    motionCritical
   );
 
-  if (critical > 0.2) {
+  if (motionCritical > 0.2) {
     drawReactorRing(
       ctx,
       cx,
@@ -535,7 +545,7 @@ function drawCore(
       phase * 1.22,
       ringWrithe * 1.12,
       tempNorm,
-      critical,
+      motionCritical,
       1
     );
   }
@@ -552,15 +562,14 @@ export function drawReactorTemp(
 
   ctx.clearRect(0, 0, width, height);
 
-  const vignetteStrength = Math.max(
-    state.directionStrength,
-    state.tempNorm * 0.25
-  );
+  const vignetteStrength = state.hasSetpoint
+    ? Math.max(state.directionStrength, state.tempNorm * 0.25)
+    : 0.16 + state.tempNorm * 0.64;
   drawVignette(
     ctx,
     width,
     height,
-    vignetteColor(state.direction, state.tempNorm),
+    vignetteColor(state.direction, state.tempNorm, state.hasSetpoint),
     vignetteStrength
   );
 
@@ -573,7 +582,8 @@ export function drawReactorTemp(
     width,
     height,
     state.tempNorm,
-    state.timeMs,
+    state.motionNorm,
+    state.animPhase,
     state.reducedMotion
   );
 }
