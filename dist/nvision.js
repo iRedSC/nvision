@@ -2303,8 +2303,13 @@ var t,e,i,n,s,a,o,r,l,c,h,d,u,m,p,g,f,_,v,y,b,x,w,$,M,k,C,S,A,z,P,I,E,T,O,N,L,F,
     `}static{this.styles=[Jt,ee,o`
       :host {
         --tile-color: var(--state-inactive-color);
-        --nv-stat-value-font-size: var(--ha-font-size-xl);
-        --nv-stat-trend-font-size: var(--ha-font-size-l);
+        --nv-stat-scale: 1.35;
+        --nv-stat-value-font-size: calc(
+          var(--nv-value-font-size) * var(--nv-stat-scale)
+        );
+        --nv-stat-trend-font-size: calc(
+          var(--nv-label-font-size) * var(--nv-stat-scale)
+        );
         display: block;
         height: 100%;
       }
@@ -2375,7 +2380,7 @@ var t,e,i,n,s,a,o,r,l,c,h,d,u,m,p,g,f,_,v,y,b,x,w,$,M,k,C,S,A,z,P,I,E,T,O,N,L,F,
       }
 
       .trend ha-icon {
-        --mdc-icon-size: 18px;
+        --mdc-icon-size: 1em;
         flex: none;
       }
 

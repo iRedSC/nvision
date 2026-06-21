@@ -278,8 +278,13 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     css`
       :host {
         --tile-color: var(--state-inactive-color);
-        --nv-stat-value-font-size: var(--ha-font-size-xl);
-        --nv-stat-trend-font-size: var(--ha-font-size-l);
+        --nv-stat-scale: 1.35;
+        --nv-stat-value-font-size: calc(
+          var(--nv-value-font-size) * var(--nv-stat-scale)
+        );
+        --nv-stat-trend-font-size: calc(
+          var(--nv-label-font-size) * var(--nv-stat-scale)
+        );
         display: block;
         height: 100%;
       }
@@ -350,7 +355,7 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
       }
 
       .trend ha-icon {
-        --mdc-icon-size: 18px;
+        --mdc-icon-size: 1em;
         flex: none;
       }
 
