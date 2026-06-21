@@ -23,14 +23,17 @@ import {
   DEFAULT_TREND_PERIOD,
   STAT_CARD_EDITOR_NAME,
   STAT_CARD_NAME,
+  trendPeriodLabel,
 } from "./const";
 import type { StatCardConfig } from "./stat-card-config";
 import {
   buildTrendDisplay,
   computeTrendResult,
+  formatComparedValue,
   loadPastValue,
   readTrendFromEntity,
   resolveAggregate,
+  type TrendColorTone,
   type TrendDirection,
 } from "./stat-trend";
 
@@ -174,11 +177,11 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     }
   }
 
-  private _trendColor(direction: TrendDirection): string {
-    if (direction === "flat") {
+  private _trendColor(tone: TrendColorTone): string {
+    if (tone === "flat") {
       return "var(--secondary-text-color)";
     }
-    if (direction === "up") {
+    if (tone === "positive") {
       return "var(--success-color)";
     }
     return "var(--error-color)";
@@ -206,8 +209,17 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
       trendResult,
       this._config.invert_colors === true
     );
-    const trendColor = this._trendColor(trend.direction);
+    const trendColor = this._trendColor(trend.colorTone);
     const showTrend = trend.text !== "—";
+    const usingHistoryTrend = !this._config.trend_entity;
+    const compareValue =
+      usingHistoryTrend && this._pastValue !== undefined
+        ? formatComparedValue(this.hass, this._pastValue, stateObj)
+        : undefined;
+    const comparePeriod = usingHistoryTrend
+      ? trendPeriodLabel(this._config.trend_period ?? DEFAULT_TREND_PERIOD)
+      : undefined;
+    const showCompare = compareValue !== undefined && compareValue !== "—";
 
     return html`
       <ha-card>
@@ -245,6 +257,15 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
                   `
                 : nothing}
             </div>
+            ${showCompare
+              ? html`
+                  <div class="compare-row">
+                    <span class="compare-value">${compareValue}</span>
+                    <span class="compare-sep">·</span>
+                    <span class="compare-period">${comparePeriod}</span>
+                  </div>
+                `
+              : nothing}
           </div>
         </div>
       </ha-card>
@@ -257,6 +278,8 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
     css`
       :host {
         --tile-color: var(--state-inactive-color);
+        --nv-stat-value-font-size: var(--ha-font-size-xl);
+        --nv-stat-trend-font-size: var(--ha-font-size-l);
         display: block;
         height: 100%;
       }
@@ -272,7 +295,7 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
         padding: 10px;
         box-sizing: border-box;
         height: 100%;
-        min-height: 56px;
+        min-height: 64px;
         cursor: pointer;
       }
 
@@ -306,7 +329,7 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
       }
 
       .value {
-        font-size: var(--nv-value-font-size);
+        font-size: var(--nv-stat-value-font-size);
         font-weight: var(--ha-font-weight-medium, 500);
         color: var(--primary-text-color);
         line-height: 1.2;
@@ -316,19 +339,39 @@ export class NvisionStatCard extends LitElement implements LovelaceCard {
         display: inline-flex;
         align-items: center;
         gap: 2px;
-        font-size: var(--nv-label-font-size);
+        font-size: var(--nv-stat-trend-font-size);
         font-weight: var(--ha-font-weight-medium, 500);
         color: var(--trend-color);
         background: color-mix(in srgb, var(--trend-color) 12%, transparent);
         border-radius: var(--ha-border-radius-sm, 4px);
-        padding: 1px 6px 1px 4px;
+        padding: 2px 8px 2px 5px;
         line-height: 1.2;
         white-space: nowrap;
       }
 
       .trend ha-icon {
-        --mdc-icon-size: 14px;
+        --mdc-icon-size: 18px;
         flex: none;
+      }
+
+      .compare-row {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 4px;
+        min-width: 0;
+        font-size: var(--ha-font-size-xs, 0.75rem);
+        line-height: 1.2;
+        color: var(--secondary-text-color);
+        opacity: 0.65;
+      }
+
+      .compare-value {
+        font-weight: var(--ha-font-weight-medium, 500);
+      }
+
+      .compare-sep {
+        opacity: 0.8;
       }
     `,
   ];

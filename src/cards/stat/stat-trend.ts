@@ -4,6 +4,7 @@ import {
   type AggregateType,
 } from "../../utils/history-data";
 import type { HomeAssistant } from "../../types";
+import type { HassEntity } from "home-assistant-js-websocket";
 import { parseNumericState } from "../../utils/power-lightning";
 import { FLAT_TREND_THRESHOLD } from "./const";
 
@@ -11,8 +12,11 @@ export type TrendDirection = "up" | "down" | "flat";
 
 export interface TrendDisplay {
   direction: TrendDirection;
+  colorTone: TrendColorTone;
   text: string;
 }
+
+export type TrendColorTone = "positive" | "negative" | "flat";
 
 export interface TrendResult {
   percent?: number;
@@ -44,8 +48,7 @@ export function computeTrendResult(
 }
 
 export function resolveTrendDirection(
-  result: TrendResult | undefined,
-  invertColors: boolean
+  result: TrendResult | undefined
 ): TrendDirection {
   if (!result) {
     return "flat";
@@ -59,11 +62,22 @@ export function resolveTrendDirection(
     return "flat";
   }
 
-  const up = delta > 0;
-  if (invertColors) {
-    return up ? "down" : "up";
+  return delta > 0 ? "up" : "down";
+}
+
+export function resolveTrendColorTone(
+  direction: TrendDirection,
+  invertColors: boolean
+): TrendColorTone {
+  if (direction === "flat") {
+    return "flat";
   }
-  return up ? "up" : "down";
+
+  const positive = direction === "up";
+  if (invertColors) {
+    return positive ? "negative" : "positive";
+  }
+  return positive ? "positive" : "negative";
 }
 
 export function formatTrendText(result: TrendResult | undefined): string {
@@ -131,12 +145,49 @@ export function resolveAggregate(
   return defaultAggregate(entityId, attributes);
 }
 
+export function formatComparedValue(
+  hass: HomeAssistant | undefined,
+  value: number | undefined,
+  stateObj: HassEntity | undefined
+): string {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  if (hass?.formatEntityStateToParts && stateObj) {
+    const parts = hass.formatEntityStateToParts(stateObj, String(value));
+    const formatted = parts.map((part) => part.value).join("");
+    if (formatted.length > 0) {
+      return formatted;
+    }
+  }
+
+  const unit =
+    typeof stateObj?.attributes?.unit_of_measurement === "string"
+      ? stateObj.attributes.unit_of_measurement
+      : "";
+
+  const rounded =
+    Math.abs(value - Math.round(value)) < 0.05
+      ? String(Math.round(value))
+      : value.toFixed(1);
+
+  if (!unit) {
+    return rounded;
+  }
+
+  const suffix = unit.startsWith("°") ? unit : ` ${unit}`.trimEnd();
+  return `${rounded}${suffix}`;
+}
+
 export function buildTrendDisplay(
   result: TrendResult | undefined,
   invertColors: boolean
 ): TrendDisplay {
+  const direction = resolveTrendDirection(result);
   return {
-    direction: resolveTrendDirection(result, invertColors),
+    direction,
+    colorTone: resolveTrendColorTone(direction, invertColors),
     text: formatTrendText(result),
   };
 }

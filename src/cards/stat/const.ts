@@ -10,4 +10,15 @@ export const TREND_PERIOD_OPTIONS = [
   { value: "720", label: "30 days" },
 ] as const;
 
+export const TREND_PERIOD_LABELS: Record<number, string> = {
+  1: "1 hour",
+  24: "24 hours",
+  168: "7 days",
+  720: "30 days",
+};
+
+export function trendPeriodLabel(hours: number): string {
+  return TREND_PERIOD_LABELS[hours] ?? `${hours} hours`;
+}
+
 export const FLAT_TREND_THRESHOLD = 0.5;
