@@ -512,7 +512,7 @@ export function contentFade(
                 ? 0.06
                 : 0.06 +
                   0.94 * smoothstep((x - fadeStart) / (fadeEnd - fadeStart));
-    }
+    } //
 
     const centerY = height * 0.5;
     const band = height * 0.42;
