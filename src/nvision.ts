@@ -12,6 +12,7 @@ import "./cards/light/light-card";
 import "./cards/heat-map/heat-map-card";
 import "./cards/entity-overview/entity-overview-card";
 import "./cards/reactor-temp/reactor-temp-card";
+import "./cards/stat/stat-card";
 
 console.info(
   `%c nvision ${version} `,
