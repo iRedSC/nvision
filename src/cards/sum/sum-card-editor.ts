@@ -1,4 +1,4 @@
-import { css, html, nothing } from "lit";
+import { html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { HaFormSchema, LovelaceCardEditor } from "../../types";
 import { fireEvent } from "../../types";
@@ -14,16 +14,13 @@ import {
   SUM_THEME_OPTIONS,
 } from "./const";
 import type { SumCardConfig } from "./sum-card-config";
-import { normalizeEditorEntities } from "./sum-card-config";
+import { entityIdsFromEntries } from "./sum-card-config";
 
-const ENTITIES_SCHEMA: HaFormSchema[] = [
+const SCHEMA: HaFormSchema[] = [
   {
     name: "entities",
-    selector: { entities: { domain: ["sensor"] } },
+    selector: { entity: { multiple: true, domain: "sensor" } },
   },
-];
-
-const SETTINGS_SCHEMA: HaFormSchema[] = [
   {
     name: "columns",
     default: DEFAULT_COLUMNS,
@@ -43,42 +40,6 @@ const SETTINGS_SCHEMA: HaFormSchema[] = [
   interactionEditorSchema(),
 ];
 
-let entitiesEditorLoad: Promise<void> | undefined;
-
-async function ensureEntitiesEditorLoaded(): Promise<void> {
-  if (entitiesEditorLoad) {
-    return entitiesEditorLoad;
-  }
-
-  entitiesEditorLoad = (async () => {
-    const entitiesCard = customElements.get("hui-entities-card") as
-      | { getConfigElement?: () => Promise<unknown> }
-      | undefined;
-
-    if (entitiesCard?.getConfigElement) {
-      await entitiesCard.getConfigElement();
-      return;
-    }
-
-    const loadHelpers = (
-      window as Window & {
-        loadCardHelpers?: () => Promise<{
-          createCardElement: (
-            config: Record<string, unknown>
-          ) => Promise<unknown>;
-        }>;
-      }
-    ).loadCardHelpers;
-
-    if (loadHelpers) {
-      const helpers = await loadHelpers();
-      await helpers.createCardElement({ type: "entities", entities: [] });
-    }
-  })();
-
-  return entitiesEditorLoad;
-}
-
 @customElement(SUM_CARD_EDITOR_NAME)
 export class NvisionSumCardEditor
   extends NvisionBaseElement
@@ -86,21 +47,13 @@ export class NvisionSumCardEditor
 {
   @state() private _config?: SumCardConfig;
 
-  @state() private _entitiesEditorReady = false;
-
-  connectedCallback(): void {
-    super.connectedCallback();
-    void ensureEntitiesEditorLoaded().then(() => {
-      this._entitiesEditorReady = true;
-    });
-  }
-
   public setConfig(config: SumCardConfig): void {
     this._config = {
+      entities: [],
       columns: DEFAULT_COLUMNS,
       theme: DEFAULT_THEME,
       ...config,
-      entities: normalizeEditorEntities(config.entities),
+      entities: entityIdsFromEntries(config.entities),
     };
   }
 
@@ -144,57 +97,20 @@ export class NvisionSumCardEditor
       return nothing;
     }
 
-    if (!this._entitiesEditorReady) {
-      return html`<div class="loading">Loading editor…</div>`;
-    }
-
     return html`
       <ha-form
         .hass=${this.hass}
-        .data=${{ entities: this._config.entities }}
-        .schema=${ENTITIES_SCHEMA}
-        .computeLabel=${this._computeLabel}
-        @value-changed=${this._entitiesChanged}
-      ></ha-form>
-      <ha-form
-        .hass=${this.hass}
         .data=${this._config}
-        .schema=${SETTINGS_SCHEMA}
+        .schema=${SCHEMA}
         .computeLabel=${this._computeLabel}
-        @value-changed=${this._settingsChanged}
+        @value-changed=${this._valueChanged}
       ></ha-form>
     `;
   }
 
-  private _entitiesChanged(ev: CustomEvent): void {
-    fireEvent(this, "config-changed", {
-      config: {
-        ...this._config,
-        entities: normalizeEditorEntities(ev.detail.value.entities),
-      },
-    });
+  private _valueChanged(ev: CustomEvent): void {
+    fireEvent(this, "config-changed", { config: ev.detail.value });
   }
-
-  private _settingsChanged(ev: CustomEvent): void {
-    fireEvent(this, "config-changed", {
-      config: {
-        ...this._config,
-        ...ev.detail.value,
-        entities: this._config?.entities ?? [],
-      },
-    });
-  }
-
-  static styles = css`
-    :host {
-      display: block;
-    }
-
-    .loading {
-      padding: 16px;
-      color: var(--secondary-text-color);
-    }
-  `;
 }
 
 declare global {

@@ -36,20 +36,10 @@ export interface ResolvedSumEntity {
   showName: boolean;
 }
 
-export function normalizeEditorEntities(
+export function entityIdsFromEntries(
   entries: SumEntityEntry[] | undefined
-): SumEntityConfig[] {
-  if (!entries?.length) {
-    return [];
-  }
-
-  return entries.flatMap((entry) => {
-    if (typeof entry === "string") {
-      return entry ? [{ entity: entry }] : [];
-    }
-
-    return entry.entity ? [entry] : [];
-  });
+): string[] {
+  return resolveSumEntities(entries).map((entry) => entry.entityId);
 }
 
 export function resolveSumEntities(
