@@ -18,7 +18,7 @@ import type { SumCardConfig } from "./sum-card-config";
 const SCHEMA: HaFormSchema[] = [
   {
     name: "entities",
-    selector: { entity: { multiple: true, domain: "sensor" } },
+    selector: { entities: { domain: "sensor" } },
   },
   {
     name: "columns",

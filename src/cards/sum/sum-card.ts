@@ -12,7 +12,6 @@ import {
   ActionHandlers,
   moreInfoInteractions,
 } from "../../utils/action-handlers";
-import { formatStateWithUnit } from "../../utils/entity-state";
 import { parseNumericState } from "../../utils/power-lightning";
 import {
   responsiveStateIconStyles,
@@ -26,8 +25,9 @@ import {
   SUM_THEME_ICONS,
   type SumTheme,
 } from "./const";
-import type { SumCardConfig } from "./sum-card-config";
-import { formatSumTotal } from "./sum-format";
+import type { ResolvedSumEntity, SumCardConfig } from "./sum-card-config";
+import { resolveSumEntities } from "./sum-card-config";
+import { formatEntityValue, formatSumTotal } from "./sum-format";
 
 registerCustomCard({
   type: SUM_CARD_NAME,
@@ -150,8 +150,8 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
     this._syncLayout();
   }
 
-  private _entityIds(): string[] {
-    return this._config?.entities ?? [];
+  private _entities(): ResolvedSumEntity[] {
+    return resolveSumEntities(this._config?.entities);
   }
 
   private _theme(): SumTheme {
@@ -161,15 +161,14 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
   private _sumState(): {
     sum: number | undefined;
     reference?: HassEntity;
-    hasNumeric: boolean;
   } {
-    const entities = this._entityIds();
+    const entities = this._entities();
     let sum = 0;
     let hasNumeric = false;
     let reference: HassEntity | undefined;
 
-    for (const entityId of entities) {
-      const stateObj = this.hass?.states[entityId];
+    for (const entry of entities) {
+      const stateObj = this.hass?.states[entry.entityId];
       const value = parseNumericState(stateObj?.state);
 
       if (value === undefined) {
@@ -187,20 +186,19 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
     return {
       sum: hasNumeric ? sum : undefined,
       reference,
-      hasNumeric,
     };
   }
 
   private _syncLayout(): void {
     const configured = this._config?.columns ?? DEFAULT_COLUMNS;
-    const count = this._entityIds().length;
+    const count = this._entities().length;
     const columns = count > 0 ? Math.min(configured, count) : configured;
     this.style.setProperty("--columns", String(columns));
     this.dataset.theme = this._theme();
   }
 
   public getCardSize(): number {
-    const entities = this._entityIds().length || 1;
+    const entities = this._entities().length || 1;
     const columns = this._config?.columns ?? DEFAULT_COLUMNS;
     return 1 + Math.max(1, Math.ceil(entities / columns));
   }
@@ -218,7 +216,7 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
       return nothing;
     }
 
-    const entities = this._entityIds();
+    const entities = this._entities();
     const theme = this._theme();
     const { sum, reference } = this._sumState();
     const totalLabel = this._config.name || "Total";
@@ -248,31 +246,45 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
           ></ha-tile-info>
         </div>
         <div class="entities">
-          ${entities.map((entityId) => {
-            const stateObj = this.hass!.states[entityId];
-            const value = formatStateWithUnit(stateObj);
+          ${entities.map((entry) => {
+            const stateObj = this.hass!.states[entry.entityId];
+            const value = formatEntityValue(this.hass, stateObj, theme);
+            const primary = entry.showName
+              ? entry.name ||
+                stateObj?.attributes.friendly_name ||
+                entry.entityId
+              : "";
 
             return html`
               <div
                 class="entity"
                 role="button"
                 tabindex="0"
-                @click=${this._actions.bind(entityId).click}
-                @dblclick=${this._actions.bind(entityId).dblclick}
-                @keydown=${this._actions.bind(entityId).keydown}
-                @pointerdown=${this._actions.bind(entityId).pointerdown}
-                @pointerup=${this._actions.bind(entityId).pointerup}
-                @pointerleave=${this._actions.bind(entityId).pointerleave}
-                @pointercancel=${this._actions.bind(entityId).pointercancel}
+                @click=${this._actions.bind(entry.entityId).click}
+                @dblclick=${this._actions.bind(entry.entityId).dblclick}
+                @keydown=${this._actions.bind(entry.entityId).keydown}
+                @pointerdown=${this._actions.bind(entry.entityId).pointerdown}
+                @pointerup=${this._actions.bind(entry.entityId).pointerup}
+                @pointerleave=${this._actions.bind(entry.entityId).pointerleave}
+                @pointercancel=${this._actions.bind(entry.entityId).pointercancel}
               >
-                ${stateObj
-                  ? html`<ha-state-icon
-                      .hass=${this.hass}
-                      .stateObj=${stateObj}
-                    ></ha-state-icon>`
+                ${entry.showIcon
+                  ? entry.image
+                    ? html`<img
+                        class="entity-image"
+                        src=${entry.image}
+                        alt=""
+                      />`
+                    : stateObj
+                      ? html`<ha-state-icon
+                          .hass=${this.hass}
+                          .stateObj=${stateObj}
+                          .overrideIcon=${entry.icon}
+                        ></ha-state-icon>`
+                      : nothing
                   : nothing}
                 <ha-tile-info
-                  .primary=${stateObj?.attributes.friendly_name ?? entityId}
+                  .primary=${primary}
                   .secondary=${value}
                 ></ha-tile-info>
               </div>
@@ -319,18 +331,31 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
       .total {
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 10px;
         padding: 12px 12px 10px;
         border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
         cursor: pointer;
         min-height: 56px;
         box-sizing: border-box;
+        text-align: center;
       }
 
       .total-icon {
         flex: none;
         color: var(--sum-accent);
         --mdc-icon-size: var(--nv-icon-size);
+      }
+
+      .total ha-tile-info {
+        flex: 0 1 auto;
+        text-align: center;
+        --ha-tile-info-primary-font-size: var(--nv-label-font-size);
+        --ha-tile-info-secondary-font-size: calc(
+          var(--nv-value-font-size) * 1.15
+        );
+        --ha-tile-info-secondary-font-weight: var(--ha-font-weight-bold, 700);
+        --ha-tile-info-secondary-color: var(--sum-accent);
       }
 
       .entities {
@@ -350,9 +375,17 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
         cursor: pointer;
       }
 
-      ha-state-icon {
+      ha-state-icon,
+      .entity-image {
         flex: none;
         color: var(--primary-text-color);
+      }
+
+      .entity-image {
+        width: var(--nv-icon-size, 24px);
+        height: var(--nv-icon-size, 24px);
+        object-fit: cover;
+        border-radius: 50%;
       }
 
       ha-tile-info {
@@ -363,13 +396,6 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
         --ha-tile-info-secondary-font-size: var(--nv-value-font-size);
         --ha-tile-info-secondary-font-weight: var(--ha-font-weight-medium, 500);
         --ha-tile-info-secondary-color: var(--primary-text-color);
-      }
-
-      .total ha-tile-info {
-        --ha-tile-info-primary-font-size: var(--nv-label-font-size);
-        --ha-tile-info-secondary-font-size: calc(var(--nv-value-font-size) * 1.15);
-        --ha-tile-info-secondary-font-weight: var(--ha-font-weight-bold, 700);
-        --ha-tile-info-secondary-color: var(--sum-accent);
       }
     `,
   ];
