@@ -237,13 +237,15 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
           @pointerleave=${this._actions.bind().pointerleave}
           @pointercancel=${this._actions.bind().pointercancel}
         >
-          ${themeIcon
-            ? html`<ha-icon class="total-icon" .icon=${themeIcon}></ha-icon>`
-            : nothing}
-          <ha-tile-info
-            .primary=${totalLabel}
-            .secondary=${totalValue}
-          ></ha-tile-info>
+          <div class="total-inner">
+            <div class="total-label-row">
+              ${themeIcon
+                ? html`<ha-icon class="total-icon" .icon=${themeIcon}></ha-icon>`
+                : nothing}
+              <span class="total-label">${totalLabel}</span>
+            </div>
+            <span class="total-value">${totalValue}</span>
+          </div>
         </div>
         <div class="entities">
           ${entities.map((entry) => {
@@ -330,32 +332,50 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
 
       .total {
         display: flex;
-        align-items: center;
         justify-content: center;
-        gap: 10px;
         padding: 12px 12px 10px;
         border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
         cursor: pointer;
         min-height: 56px;
         box-sizing: border-box;
+      }
+
+      .total-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
         text-align: center;
+      }
+
+      .total-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
       }
 
       .total-icon {
         flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         color: var(--sum-accent);
         --mdc-icon-size: var(--nv-icon-size);
       }
 
-      .total ha-tile-info {
-        flex: 0 1 auto;
-        text-align: center;
-        --ha-tile-info-primary-font-size: var(--nv-label-font-size);
-        --ha-tile-info-secondary-font-size: calc(
-          var(--nv-value-font-size) * 1.15
-        );
-        --ha-tile-info-secondary-font-weight: var(--ha-font-weight-bold, 700);
-        --ha-tile-info-secondary-color: var(--sum-accent);
+      .total-label {
+        font-size: var(--nv-label-font-size);
+        font-weight: var(--ha-font-weight-medium, 500);
+        color: var(--primary-text-color);
+        line-height: 1.2;
+      }
+
+      .total-value {
+        font-size: calc(var(--nv-value-font-size) * 1.15);
+        font-weight: var(--ha-font-weight-bold, 700);
+        color: var(--sum-accent);
+        line-height: 1.2;
       }
 
       .entities {

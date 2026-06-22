@@ -36,6 +36,22 @@ export interface ResolvedSumEntity {
   showName: boolean;
 }
 
+export function normalizeEditorEntities(
+  entries: SumEntityEntry[] | undefined
+): SumEntityConfig[] {
+  if (!entries?.length) {
+    return [];
+  }
+
+  return entries.flatMap((entry) => {
+    if (typeof entry === "string") {
+      return entry ? [{ entity: entry }] : [];
+    }
+
+    return entry.entity ? [entry] : [];
+  });
+}
+
 export function resolveSumEntities(
   entries: SumEntityEntry[] | undefined
 ): ResolvedSumEntity[] {

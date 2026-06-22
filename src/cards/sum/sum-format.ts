@@ -5,23 +5,10 @@ import { parseNumericState } from "../../utils/power-lightning";
 import { formatComparedValue } from "../stat/stat-trend";
 import type { SumTheme } from "./const";
 
-function monetaryAttributes(
-  entity?: HassEntity
-): HassEntity["attributes"] {
-  const attrs = { ...(entity?.attributes ?? {}) };
-  delete attrs.unit_of_measurement;
-  attrs.device_class = "monetary";
-  return attrs;
-}
-
 function themeAttributes(
   theme: SumTheme,
   entity?: HassEntity
 ): HassEntity["attributes"] {
-  if (theme === "monetary") {
-    return monetaryAttributes(entity);
-  }
-
   const attrs = { ...(entity?.attributes ?? {}) };
 
   if (theme === "energy" && !attrs.unit_of_measurement) {
@@ -40,7 +27,7 @@ function referenceState(
   theme: SumTheme,
   entity?: HassEntity
 ): HassEntity | undefined {
-  if (theme === "none") {
+  if (theme === "none" || theme === "monetary") {
     return entity;
   }
 
@@ -61,25 +48,6 @@ function referenceState(
   };
 }
 
-function formatPartsWithoutUnit(
-  hass: HomeAssistant | undefined,
-  stateObj: HassEntity,
-  value: number
-): string | undefined {
-  if (!hass?.formatEntityStateToParts) {
-    return undefined;
-  }
-
-  const parts = hass.formatEntityStateToParts(stateObj, String(value));
-  const formatted = parts
-    .filter((part) => part.type !== "unit")
-    .map((part) => part.value)
-    .join("")
-    .trim();
-
-  return formatted.length > 0 ? formatted : undefined;
-}
-
 function localeCurrency(
   hass: HomeAssistant | undefined,
   value: number
@@ -91,24 +59,17 @@ function localeCurrency(
   return new Intl.NumberFormat(language, {
     style: "currency",
     currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
 export function formatCurrencyValue(
   hass: HomeAssistant | undefined,
-  value: number | undefined,
-  referenceEntity?: HassEntity
+  value: number | undefined
 ): string {
   if (value === undefined || !Number.isFinite(value)) {
     return "—";
-  }
-
-  const stateObj = referenceState("monetary", referenceEntity);
-  if (stateObj) {
-    const formatted = formatPartsWithoutUnit(hass, stateObj, value);
-    if (formatted) {
-      return formatted;
-    }
   }
 
   return localeCurrency(hass, value);
@@ -125,7 +86,7 @@ export function formatSumTotal(
   }
 
   if (theme === "monetary") {
-    return formatCurrencyValue(hass, sum, referenceEntity);
+    return formatCurrencyValue(hass, sum);
   }
 
   return formatComparedValue(
@@ -145,11 +106,7 @@ export function formatEntityValue(
   }
 
   if (theme === "monetary") {
-    return formatCurrencyValue(
-      hass,
-      parseNumericState(stateObj.state),
-      stateObj
-    );
+    return formatCurrencyValue(hass, parseNumericState(stateObj.state));
   }
 
   return formatStateWithUnit(stateObj);
