@@ -36,6 +36,10 @@ const SCHEMA: HaFormSchema[] = [
   interactionEditorSchema(),
 ];
 
+const ICON_PRELOAD_SCHEMA: HaFormSchema[] = [
+  { name: "icon", selector: { icon: {} } },
+];
+
 const ENTITY_PANEL_SCHEMA: HaFormSchema[] = [
   { name: "name", selector: { text: {} } },
   {
@@ -45,7 +49,13 @@ const ENTITY_PANEL_SCHEMA: HaFormSchema[] = [
   },
 ];
 
-let editorComponentsLoad: Promise<void> | undefined;
+function iconPickerReady(): boolean {
+  return Boolean(
+    customElements.get("ha-icon-picker") ||
+      customElements.get("ha-selector-icon") ||
+      customElements.get("ha-picker-combo-box")
+  );
+}
 
 async function loadBuiltInEditor(
   type: string,
@@ -70,39 +80,31 @@ async function loadBuiltInEditor(
   await card.constructor.getConfigElement?.();
 }
 
-async function ensureEditorComponentsLoaded(): Promise<void> {
-  if (
-    customElements.get("ha-entity-picker") &&
-    (customElements.get("ha-icon-picker") ||
-      customElements.get("ha-selector-icon"))
-  ) {
+async function ensureEntityPickerLoaded(): Promise<void> {
+  if (customElements.get("ha-entity-picker")) {
     return;
   }
 
-  if (!editorComponentsLoad) {
-    editorComponentsLoad = (async () => {
-      if (!customElements.get("ha-entity-picker")) {
-        const glanceCard = customElements.get("hui-glance-card") as
-          | { getConfigElement?: () => Promise<unknown> }
-          | undefined;
+  const glanceCard = customElements.get("hui-glance-card") as
+    | { getConfigElement?: () => Promise<unknown> }
+    | undefined;
 
-        if (glanceCard?.getConfigElement) {
-          await glanceCard.getConfigElement();
-        } else {
-          await loadBuiltInEditor("glance", { entities: [] });
-        }
-      }
-
-      if (
-        !customElements.get("ha-icon-picker") &&
-        !customElements.get("ha-selector-icon")
-      ) {
-        await loadBuiltInEditor("light", { entity: "light.example" });
-      }
-    })();
+  if (glanceCard?.getConfigElement) {
+    await glanceCard.getConfigElement();
+    return;
   }
 
-  await editorComponentsLoad;
+  await loadBuiltInEditor("glance", { entities: [] });
+}
+
+async function waitForIconPicker(maxFrames = 30): Promise<boolean> {
+  for (let frame = 0; frame < maxFrames; frame += 1) {
+    if (iconPickerReady()) {
+      return true;
+    }
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+  return iconPickerReady();
 }
 
 @customElement(SUM_CARD_EDITOR_NAME)
@@ -112,12 +114,11 @@ export class NvisionSumCardEditor
 {
   @state() private _config?: SumCardConfig;
 
-  @state() private _componentsReady =
-    customElements.get("ha-entity-picker") &&
-    (customElements.get("ha-icon-picker") ||
-      customElements.get("ha-selector-icon"))
-      ? true
-      : false;
+  @state() private _entityPickerReady = Boolean(
+    customElements.get("ha-entity-picker")
+  );
+
+  @state() private _iconPickerReady = iconPickerReady();
 
   @state() private _expandedIndex?: number;
 
@@ -132,13 +133,31 @@ export class NvisionSumCardEditor
 
   connectedCallback(): void {
     super.connectedCallback();
-    void ensureEditorComponentsLoaded()
-      .then(() => {
-        this._componentsReady = true;
-      })
-      .catch(() => {
-        this._componentsReady = false;
-      });
+    void this._loadEditorComponents();
+  }
+
+  protected updated(): void {
+    if (!this._iconPickerReady && iconPickerReady()) {
+      this._iconPickerReady = true;
+    }
+  }
+
+  private async _loadEditorComponents(): Promise<void> {
+    try {
+      await ensureEntityPickerLoaded();
+      this._entityPickerReady = Boolean(customElements.get("ha-entity-picker"));
+
+      if (!this._iconPickerReady) {
+        await loadBuiltInEditor("entities", {
+          entities: [{ entity: "sensor.example" }],
+        });
+        await loadBuiltInEditor("light", { entity: "light.example" });
+        this._iconPickerReady = await waitForIconPicker();
+      }
+    } catch {
+      this._entityPickerReady = Boolean(customElements.get("ha-entity-picker"));
+      this._iconPickerReady = iconPickerReady();
+    }
   }
 
   private _entityPanelLabel = (schema: HaFormSchema) => {
@@ -196,6 +215,7 @@ export class NvisionSumCardEditor
     }
 
     return html`
+      ${this._renderIconPreload()}
       ${this._renderEntitiesEditor()}
       <ha-form
         .hass=${this.hass}
@@ -207,11 +227,70 @@ export class NvisionSumCardEditor
     `;
   }
 
+  private _renderIconPreload() {
+    if (this._iconPickerReady) {
+      return nothing;
+    }
+
+    return html`
+      <div class="preload" aria-hidden="true">
+        <ha-form
+          .hass=${this.hass}
+          .data=${{ icon: "" }}
+          .schema=${ICON_PRELOAD_SCHEMA}
+        ></ha-form>
+      </div>
+    `;
+  }
+
   private _settingsData(): Omit<SumCardConfig, "entities"> {
     const { entities: _entities, ...settings } = this._config ?? {
       type: "",
     };
     return settings as Omit<SumCardConfig, "entities">;
+  }
+
+  private _renderActiveEntityEditor(
+    resolved: ReturnType<typeof resolveSumEntities>
+  ) {
+    if (this._expandedIndex === undefined) {
+      return nothing;
+    }
+
+    const entry = resolved[this._expandedIndex];
+    if (!entry) {
+      return nothing;
+    }
+
+    const displayName =
+      entry.name ??
+      this.hass?.states[entry.entityId]?.attributes.friendly_name ??
+      entry.entityId;
+
+    return html`
+      <div class="entity-editor">
+        <div class="section-title">Edit ${displayName}</div>
+        <ha-form
+          .hass=${this.hass}
+          .data=${{
+            entity: entry.entityId,
+            name: entry.name ?? "",
+            icon: entry.icon ?? "",
+          }}
+          .schema=${ENTITY_PANEL_SCHEMA}
+          .computeLabel=${this._entityPanelLabel}
+          @value-changed=${(ev: CustomEvent) =>
+            this._entityPanelChanged(this._expandedIndex!, ev)}
+        ></ha-form>
+        <button
+          type="button"
+          class="remove"
+          @click=${() => this._removeEntity(this._expandedIndex!)}
+        >
+          Remove entity
+        </button>
+      </div>
+    `;
   }
 
   private _renderEntitiesEditor() {
@@ -258,39 +337,14 @@ export class NvisionSumCardEditor
                             : "mdi:chevron-down"}
                         ></ha-icon>
                       </button>
-                      ${expanded
-                        ? html`
-                            <div class="entity-panel">
-                              <ha-form
-                                class="entity-panel-form"
-                                .hass=${this.hass}
-                                .data=${{
-                                  entity: entry.entityId,
-                                  name: entry.name ?? "",
-                                  icon: entry.icon ?? "",
-                                }}
-                                .schema=${ENTITY_PANEL_SCHEMA}
-                                .computeLabel=${this._entityPanelLabel}
-                                @value-changed=${(ev: CustomEvent) =>
-                                  this._entityPanelChanged(index, ev)}
-                              ></ha-form>
-                              <button
-                                type="button"
-                                class="remove"
-                                @click=${() => this._removeEntity(index)}
-                              >
-                                Remove entity
-                              </button>
-                            </div>
-                          `
-                        : nothing}
                     </div>
                   `;
                 })}
               </div>
+              ${this._renderActiveEntityEditor(resolved)}
             `
           : html`<div class="empty">No entities selected</div>`}
-        ${this._componentsReady
+        ${this._entityPickerReady
           ? html`
               <ha-entity-picker
                 .hass=${this.hass}
@@ -335,9 +389,11 @@ export class NvisionSumCardEditor
   }
 
   private _addEntityFromForm(ev: CustomEvent): void {
-    this._addEntity(new CustomEvent("value-changed", {
-      detail: { value: ev.detail.value.entity },
-    }));
+    this._addEntity(
+      new CustomEvent("value-changed", {
+        detail: { value: ev.detail.value.entity },
+      })
+    );
   }
 
   private _removeEntity(index: number): void {
@@ -383,7 +439,7 @@ export class NvisionSumCardEditor
       typeof current === "string" ? { entity: entityId } : { ...current };
 
     const trimmedName = name?.trim() ?? "";
-    const trimmedIcon = icon?.trim() ?? "";
+    const trimmedIcon = typeof icon === "string" ? icon.trim() : "";
 
     if (trimmedName) {
       next.name = trimmedName;
@@ -422,6 +478,16 @@ export class NvisionSumCardEditor
   static styles = css`
     :host {
       display: block;
+      overflow: visible;
+    }
+
+    .preload {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
     }
 
     .entities-editor {
@@ -446,7 +512,6 @@ export class NvisionSumCardEditor
       border: 1px solid var(--divider-color);
       border-radius: 6px;
       box-sizing: border-box;
-      overflow: hidden;
     }
 
     .entity-row.expanded {
@@ -501,16 +566,18 @@ export class NvisionSumCardEditor
       --mdc-icon-size: 20px;
     }
 
-    .entity-panel {
+    .entity-editor {
       display: grid;
       gap: 8px;
-      padding: 0 0 12px;
-      border-top: 1px solid var(--divider-color);
-    }
-
-    .entity-panel-form {
-      display: block;
-      padding: 0 12px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid var(--divider-color);
+      border-radius: 6px;
+      background: color-mix(
+        in srgb,
+        var(--primary-color) 4%,
+        var(--card-background-color)
+      );
     }
 
     .remove {
@@ -518,7 +585,7 @@ export class NvisionSumCardEditor
       border: 0;
       background: transparent;
       color: var(--error-color, #f44336);
-      padding: 0 12px;
+      padding: 4px 0 0;
       cursor: pointer;
       font: inherit;
       font-size: 13px;
