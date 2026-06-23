@@ -36,42 +36,73 @@ const SCHEMA: HaFormSchema[] = [
   interactionEditorSchema(),
 ];
 
-let entityPickerLoad: Promise<void> | undefined;
+const ENTITY_PANEL_SCHEMA: HaFormSchema[] = [
+  { name: "name", selector: { text: {} } },
+  {
+    name: "icon",
+    selector: { icon: {} },
+    context: { icon_entity: "entity" },
+  },
+];
 
-async function ensureEntityPickerLoaded(): Promise<void> {
-  if (customElements.get("ha-entity-picker")) {
+let editorComponentsLoad: Promise<void> | undefined;
+
+async function loadBuiltInEditor(
+  type: string,
+  config: Record<string, unknown>
+): Promise<void> {
+  const loadHelpers = (
+    window as Window & {
+      loadCardHelpers?: () => Promise<{
+        createCardElement: (
+          cardConfig: Record<string, unknown>
+        ) => Promise<{ constructor: { getConfigElement?: () => Promise<unknown> } }>;
+      }>;
+    }
+  ).loadCardHelpers;
+
+  if (!loadHelpers) {
     return;
   }
 
-  if (!entityPickerLoad) {
-    entityPickerLoad = (async () => {
-      const glanceCard = customElements.get("hui-glance-card") as
-        | { getConfigElement?: () => Promise<unknown> }
-        | undefined;
+  const helpers = await loadHelpers();
+  const card = await helpers.createCardElement({ type, ...config });
+  await card.constructor.getConfigElement?.();
+}
 
-      if (glanceCard?.getConfigElement) {
-        await glanceCard.getConfigElement();
-        return;
+async function ensureEditorComponentsLoaded(): Promise<void> {
+  if (
+    customElements.get("ha-entity-picker") &&
+    (customElements.get("ha-icon-picker") ||
+      customElements.get("ha-selector-icon"))
+  ) {
+    return;
+  }
+
+  if (!editorComponentsLoad) {
+    editorComponentsLoad = (async () => {
+      if (!customElements.get("ha-entity-picker")) {
+        const glanceCard = customElements.get("hui-glance-card") as
+          | { getConfigElement?: () => Promise<unknown> }
+          | undefined;
+
+        if (glanceCard?.getConfigElement) {
+          await glanceCard.getConfigElement();
+        } else {
+          await loadBuiltInEditor("glance", { entities: [] });
+        }
       }
 
-      const loadHelpers = (
-        window as Window & {
-          loadCardHelpers?: () => Promise<{
-            createCardElement: (
-              config: Record<string, unknown>
-            ) => Promise<unknown>;
-          }>;
-        }
-      ).loadCardHelpers;
-
-      if (loadHelpers) {
-        const helpers = await loadHelpers();
-        await helpers.createCardElement({ type: "glance", entities: [] });
+      if (
+        !customElements.get("ha-icon-picker") &&
+        !customElements.get("ha-selector-icon")
+      ) {
+        await loadBuiltInEditor("light", { entity: "light.example" });
       }
     })();
   }
 
-  await entityPickerLoad;
+  await editorComponentsLoad;
 }
 
 @customElement(SUM_CARD_EDITOR_NAME)
@@ -81,9 +112,12 @@ export class NvisionSumCardEditor
 {
   @state() private _config?: SumCardConfig;
 
-  @state() private _pickerReady = customElements.get("ha-entity-picker")
-    ? true
-    : false;
+  @state() private _componentsReady =
+    customElements.get("ha-entity-picker") &&
+    (customElements.get("ha-icon-picker") ||
+      customElements.get("ha-selector-icon"))
+      ? true
+      : false;
 
   @state() private _expandedIndex?: number;
 
@@ -98,14 +132,34 @@ export class NvisionSumCardEditor
 
   connectedCallback(): void {
     super.connectedCallback();
-    void ensureEntityPickerLoaded()
+    void ensureEditorComponentsLoaded()
       .then(() => {
-        this._pickerReady = true;
+        this._componentsReady = true;
       })
       .catch(() => {
-        this._pickerReady = false;
+        this._componentsReady = false;
       });
   }
+
+  private _entityPanelLabel = (schema: HaFormSchema) => {
+    if (!this.hass) {
+      return undefined;
+    }
+
+    if (schema.name === "name") {
+      return this.hass.localize(
+        "ui.panel.lovelace.editor.card.generic.name"
+      );
+    }
+
+    if (schema.name === "icon") {
+      return this.hass.localize(
+        "ui.panel.lovelace.editor.card.generic.icon"
+      );
+    }
+
+    return undefined;
+  };
 
   private _computeLabel = (schema: HaFormSchema) => {
     if (!this.hass) {
@@ -207,36 +261,19 @@ export class NvisionSumCardEditor
                       ${expanded
                         ? html`
                             <div class="entity-panel">
-                              <label>
-                                <span>Name</span>
-                                <input
-                                  type="text"
-                                  .value=${entry.name ?? ""}
-                                  placeholder=${this.hass?.states[entry.entityId]
-                                    ?.attributes.friendly_name ?? entry.entityId}
-                                  @change=${(ev: Event) =>
-                                    this._updateEntityField(
-                                      index,
-                                      "name",
-                                      (ev.target as HTMLInputElement).value
-                                    )}
-                                />
-                              </label>
-                              <label>
-                                <span>Icon</span>
-                                <input
-                                  type="text"
-                                  .value=${entry.icon ?? ""}
-                                  placeholder=${this.hass?.states[entry.entityId]
-                                    ?.attributes.icon ?? "mdi:home"}
-                                  @change=${(ev: Event) =>
-                                    this._updateEntityField(
-                                      index,
-                                      "icon",
-                                      (ev.target as HTMLInputElement).value
-                                    )}
-                                />
-                              </label>
+                              <ha-form
+                                class="entity-panel-form"
+                                .hass=${this.hass}
+                                .data=${{
+                                  entity: entry.entityId,
+                                  name: entry.name ?? "",
+                                  icon: entry.icon ?? "",
+                                }}
+                                .schema=${ENTITY_PANEL_SCHEMA}
+                                .computeLabel=${this._entityPanelLabel}
+                                @value-changed=${(ev: CustomEvent) =>
+                                  this._entityPanelChanged(index, ev)}
+                              ></ha-form>
                               <button
                                 type="button"
                                 class="remove"
@@ -253,7 +290,7 @@ export class NvisionSumCardEditor
               </div>
             `
           : html`<div class="empty">No entities selected</div>`}
-        ${this._pickerReady
+        ${this._componentsReady
           ? html`
               <ha-entity-picker
                 .hass=${this.hass}
@@ -319,34 +356,49 @@ export class NvisionSumCardEditor
     this._emitConfig({ entities });
   }
 
-  private _updateEntityField(
+  private _entityPanelChanged(index: number, ev: CustomEvent): void {
+    const { name, icon } = ev.detail.value as {
+      name?: string;
+      icon?: string;
+    };
+
+    this._applyEntityOverrides(index, name, icon);
+  }
+
+  private _applyEntityOverrides(
     index: number,
-    field: "name" | "icon",
-    value: string
+    name?: string,
+    icon?: string
   ): void {
     const entities = [...(this._config?.entities ?? [])];
     const current = entities[index];
-    const entity =
-      typeof current === "string"
-        ? current
-        : current?.entity;
+    const entityId =
+      typeof current === "string" ? current : current?.entity;
 
-    if (!entity) {
+    if (!entityId) {
       return;
     }
 
     const next: SumEntityConfig =
-      typeof current === "string" ? { entity } : { ...current };
-    const trimmed = value.trim();
+      typeof current === "string" ? { entity: entityId } : { ...current };
 
-    if (trimmed) {
-      next[field] = trimmed;
+    const trimmedName = name?.trim() ?? "";
+    const trimmedIcon = icon?.trim() ?? "";
+
+    if (trimmedName) {
+      next.name = trimmedName;
     } else {
-      delete next[field];
+      delete next.name;
+    }
+
+    if (trimmedIcon) {
+      next.icon = trimmedIcon;
+    } else {
+      delete next.icon;
     }
 
     if (!next.name && !next.icon && !next.image) {
-      entities[index] = next.entity;
+      entities[index] = entityId;
     } else {
       entities[index] = next;
     }
@@ -451,9 +503,14 @@ export class NvisionSumCardEditor
 
     .entity-panel {
       display: grid;
-      gap: 10px;
-      padding: 0 12px 12px;
+      gap: 8px;
+      padding: 0 0 12px;
       border-top: 1px solid var(--divider-color);
+    }
+
+    .entity-panel-form {
+      display: block;
+      padding: 0 12px;
     }
 
     .remove {
@@ -461,7 +518,7 @@ export class NvisionSumCardEditor
       border: 0;
       background: transparent;
       color: var(--error-color, #f44336);
-      padding: 4px 0 0;
+      padding: 0 12px;
       cursor: pointer;
       font: inherit;
       font-size: 13px;
@@ -469,32 +526,6 @@ export class NvisionSumCardEditor
 
     .remove:hover {
       text-decoration: underline;
-    }
-
-    label {
-      display: grid;
-      gap: 4px;
-      min-width: 0;
-      color: var(--secondary-text-color);
-      font-size: 12px;
-    }
-
-    input {
-      min-width: 0;
-      height: 36px;
-      padding: 0 10px;
-      border: 1px solid var(--divider-color);
-      border-radius: 4px;
-      box-sizing: border-box;
-      color: var(--primary-text-color);
-      background: var(--card-background-color);
-      font: inherit;
-      font-size: 14px;
-    }
-
-    input:focus {
-      border-color: var(--primary-color);
-      outline: none;
     }
 
     .empty {
