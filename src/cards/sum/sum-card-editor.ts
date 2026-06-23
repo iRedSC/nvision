@@ -85,6 +85,8 @@ export class NvisionSumCardEditor
     ? true
     : false;
 
+  @state() private _expandedIndex?: number;
+
   public setConfig(config: SumCardConfig): void {
     this._config = {
       entities: [],
@@ -168,71 +170,86 @@ export class NvisionSumCardEditor
         ${resolved.length
           ? html`
               <div class="entity-list">
-                ${resolved.map(
-                  (entry, index) => html`
-                    <div class="entity-row">
-                      <div class="entity-row-header">
-                        <div class="entity-title">
-                          ${entry.icon
-                            ? html`<ha-icon
-                                class="entity-preview"
-                                .icon=${entry.icon}
-                              ></ha-icon>`
-                            : html`<ha-state-icon
-                                class="entity-preview"
-                                .hass=${this.hass}
-                                .stateObj=${this.hass?.states[entry.entityId]}
-                              ></ha-state-icon>`}
-                          <span class="entity-name">
-                            ${entry.name ??
-                            this.hass?.states[entry.entityId]?.attributes
-                              .friendly_name ??
-                            entry.entityId}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          class="remove"
-                          @click=${() => this._removeEntity(index)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                      <div class="entity-fields">
-                        <label>
-                          <span>Name</span>
-                          <input
-                            type="text"
-                            .value=${entry.name ?? ""}
-                            placeholder=${this.hass?.states[entry.entityId]
-                              ?.attributes.friendly_name ?? entry.entityId}
-                            @change=${(ev: Event) =>
-                              this._updateEntityField(
-                                index,
-                                "name",
-                                (ev.target as HTMLInputElement).value
-                              )}
-                          />
-                        </label>
-                        <label>
-                          <span>Icon</span>
-                          <input
-                            type="text"
-                            .value=${entry.icon ?? ""}
-                            placeholder=${this.hass?.states[entry.entityId]
-                              ?.attributes.icon ?? "mdi:home"}
-                            @change=${(ev: Event) =>
-                              this._updateEntityField(
-                                index,
-                                "icon",
-                                (ev.target as HTMLInputElement).value
-                              )}
-                          />
-                        </label>
-                      </div>
+                ${resolved.map((entry, index) => {
+                  const expanded = this._expandedIndex === index;
+                  const displayName =
+                    entry.name ??
+                    this.hass?.states[entry.entityId]?.attributes
+                      .friendly_name ??
+                    entry.entityId;
+
+                  return html`
+                    <div class="entity-row ${expanded ? "expanded" : ""}">
+                      <button
+                        type="button"
+                        class="entity-summary"
+                        aria-expanded=${expanded}
+                        @click=${() => this._toggleRow(index)}
+                      >
+                        ${entry.icon
+                          ? html`<ha-icon
+                              class="entity-preview"
+                              .icon=${entry.icon}
+                            ></ha-icon>`
+                          : html`<ha-state-icon
+                              class="entity-preview"
+                              .hass=${this.hass}
+                              .stateObj=${this.hass?.states[entry.entityId]}
+                            ></ha-state-icon>`}
+                        <span class="entity-name">${displayName}</span>
+                        <ha-icon
+                          class="chevron"
+                          .icon=${expanded
+                            ? "mdi:chevron-up"
+                            : "mdi:chevron-down"}
+                        ></ha-icon>
+                      </button>
+                      ${expanded
+                        ? html`
+                            <div class="entity-panel">
+                              <label>
+                                <span>Name</span>
+                                <input
+                                  type="text"
+                                  .value=${entry.name ?? ""}
+                                  placeholder=${this.hass?.states[entry.entityId]
+                                    ?.attributes.friendly_name ?? entry.entityId}
+                                  @change=${(ev: Event) =>
+                                    this._updateEntityField(
+                                      index,
+                                      "name",
+                                      (ev.target as HTMLInputElement).value
+                                    )}
+                                />
+                              </label>
+                              <label>
+                                <span>Icon</span>
+                                <input
+                                  type="text"
+                                  .value=${entry.icon ?? ""}
+                                  placeholder=${this.hass?.states[entry.entityId]
+                                    ?.attributes.icon ?? "mdi:home"}
+                                  @change=${(ev: Event) =>
+                                    this._updateEntityField(
+                                      index,
+                                      "icon",
+                                      (ev.target as HTMLInputElement).value
+                                    )}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                class="remove"
+                                @click=${() => this._removeEntity(index)}
+                              >
+                                Remove entity
+                              </button>
+                            </div>
+                          `
+                        : nothing}
                     </div>
-                  `
-                )}
+                  `;
+                })}
               </div>
             `
           : html`<div class="empty">No entities selected</div>`}
@@ -272,7 +289,12 @@ export class NvisionSumCardEditor
       return;
     }
 
+    this._expandedIndex = entities.length;
     this._emitConfig({ entities: [...entities, entityId] });
+  }
+
+  private _toggleRow(index: number): void {
+    this._expandedIndex = this._expandedIndex === index ? undefined : index;
   }
 
   private _addEntityFromForm(ev: CustomEvent): void {
@@ -284,6 +306,16 @@ export class NvisionSumCardEditor
   private _removeEntity(index: number): void {
     const entities = [...(this._config?.entities ?? [])];
     entities.splice(index, 1);
+
+    if (this._expandedIndex === index) {
+      this._expandedIndex = undefined;
+    } else if (
+      this._expandedIndex !== undefined &&
+      this._expandedIndex > index
+    ) {
+      this._expandedIndex -= 1;
+    }
+
     this._emitConfig({ entities });
   }
 
@@ -359,27 +391,42 @@ export class NvisionSumCardEditor
     }
 
     .entity-row {
-      display: grid;
-      gap: 10px;
-      padding: 10px 0 10px 12px;
       border: 1px solid var(--divider-color);
       border-radius: 6px;
       box-sizing: border-box;
+      overflow: hidden;
     }
 
-    .entity-row-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: 28px;
+    .entity-row.expanded {
+      border-color: color-mix(
+        in srgb,
+        var(--primary-color) 35%,
+        var(--divider-color)
+      );
     }
 
-    .entity-title {
+    .entity-summary {
       display: flex;
       align-items: center;
       gap: 8px;
-      min-width: 0;
+      width: 100%;
+      min-height: 44px;
+      padding: 0 12px;
+      border: 0;
+      background: transparent;
+      color: var(--primary-text-color);
+      cursor: pointer;
+      font: inherit;
+      text-align: left;
+      box-sizing: border-box;
+    }
+
+    .entity-summary:hover {
+      background: color-mix(
+        in srgb,
+        var(--primary-color) 8%,
+        transparent
+      );
     }
 
     .entity-preview {
@@ -389,28 +436,39 @@ export class NvisionSumCardEditor
     }
 
     .entity-name {
+      flex: 1;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .remove {
-      align-self: stretch;
-      border: 0;
-      border-left: 1px solid var(--divider-color);
-      background: transparent;
-      color: var(--primary-color);
-      padding: 0 12px;
-      cursor: pointer;
-      font: inherit;
+    .chevron {
+      flex: none;
+      color: var(--secondary-text-color);
+      --mdc-icon-size: 20px;
     }
 
-    .entity-fields {
+    .entity-panel {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      padding-right: 12px;
+      gap: 10px;
+      padding: 0 12px 12px;
+      border-top: 1px solid var(--divider-color);
+    }
+
+    .remove {
+      justify-self: start;
+      border: 0;
+      background: transparent;
+      color: var(--error-color, #f44336);
+      padding: 4px 0 0;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+    }
+
+    .remove:hover {
+      text-decoration: underline;
     }
 
     label {
