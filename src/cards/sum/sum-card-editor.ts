@@ -13,7 +13,7 @@ import {
   SUM_CARD_EDITOR_NAME,
   SUM_THEME_OPTIONS,
 } from "./const";
-import type { SumCardConfig, SumEntityEntry } from "./sum-card-config";
+import type { SumCardConfig, SumEntityConfig } from "./sum-card-config";
 import { resolveSumEntities } from "./sum-card-config";
 
 const SCHEMA: HaFormSchema[] = [
@@ -171,19 +171,65 @@ export class NvisionSumCardEditor
                 ${resolved.map(
                   (entry, index) => html`
                     <div class="entity-row">
-                      <span class="entity-name">
-                        ${entry.name ??
-                        this.hass?.states[entry.entityId]?.attributes
-                          .friendly_name ??
-                        entry.entityId}
-                      </span>
-                      <button
-                        type="button"
-                        class="remove"
-                        @click=${() => this._removeEntity(index)}
-                      >
-                        Remove
-                      </button>
+                      <div class="entity-row-header">
+                        <div class="entity-title">
+                          ${entry.icon
+                            ? html`<ha-icon
+                                class="entity-preview"
+                                .icon=${entry.icon}
+                              ></ha-icon>`
+                            : html`<ha-state-icon
+                                class="entity-preview"
+                                .hass=${this.hass}
+                                .stateObj=${this.hass?.states[entry.entityId]}
+                              ></ha-state-icon>`}
+                          <span class="entity-name">
+                            ${entry.name ??
+                            this.hass?.states[entry.entityId]?.attributes
+                              .friendly_name ??
+                            entry.entityId}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          class="remove"
+                          @click=${() => this._removeEntity(index)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div class="entity-fields">
+                        <label>
+                          <span>Name</span>
+                          <input
+                            type="text"
+                            .value=${entry.name ?? ""}
+                            placeholder=${this.hass?.states[entry.entityId]
+                              ?.attributes.friendly_name ?? entry.entityId}
+                            @change=${(ev: Event) =>
+                              this._updateEntityField(
+                                index,
+                                "name",
+                                (ev.target as HTMLInputElement).value
+                              )}
+                          />
+                        </label>
+                        <label>
+                          <span>Icon</span>
+                          <input
+                            type="text"
+                            .value=${entry.icon ?? ""}
+                            placeholder=${this.hass?.states[entry.entityId]
+                              ?.attributes.icon ?? "mdi:home"}
+                            @change=${(ev: Event) =>
+                              this._updateEntityField(
+                                index,
+                                "icon",
+                                (ev.target as HTMLInputElement).value
+                              )}
+                          />
+                        </label>
+                      </div>
                     </div>
                   `
                 )}
@@ -241,6 +287,41 @@ export class NvisionSumCardEditor
     this._emitConfig({ entities });
   }
 
+  private _updateEntityField(
+    index: number,
+    field: "name" | "icon",
+    value: string
+  ): void {
+    const entities = [...(this._config?.entities ?? [])];
+    const current = entities[index];
+    const entity =
+      typeof current === "string"
+        ? current
+        : current?.entity;
+
+    if (!entity) {
+      return;
+    }
+
+    const next: SumEntityConfig =
+      typeof current === "string" ? { entity } : { ...current };
+    const trimmed = value.trim();
+
+    if (trimmed) {
+      next[field] = trimmed;
+    } else {
+      delete next[field];
+    }
+
+    if (!next.name && !next.icon && !next.image) {
+      entities[index] = next.entity;
+    } else {
+      entities[index] = next;
+    }
+
+    this._emitConfig({ entities });
+  }
+
   private _settingsChanged(ev: CustomEvent): void {
     this._emitConfig(ev.detail.value);
   }
@@ -278,15 +359,33 @@ export class NvisionSumCardEditor
     }
 
     .entity-row {
+      display: grid;
+      gap: 10px;
+      padding: 10px 0 10px 12px;
+      border: 1px solid var(--divider-color);
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+
+    .entity-row-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      min-height: 36px;
-      padding: 0 0 0 12px;
-      border: 1px solid var(--divider-color);
-      border-radius: 6px;
-      box-sizing: border-box;
+      min-height: 28px;
+    }
+
+    .entity-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .entity-preview {
+      flex: none;
+      color: var(--primary-text-color);
+      --mdc-icon-size: 20px;
     }
 
     .entity-name {
@@ -305,6 +404,39 @@ export class NvisionSumCardEditor
       padding: 0 12px;
       cursor: pointer;
       font: inherit;
+    }
+
+    .entity-fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding-right: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      color: var(--secondary-text-color);
+      font-size: 12px;
+    }
+
+    input {
+      min-width: 0;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      box-sizing: border-box;
+      color: var(--primary-text-color);
+      background: var(--card-background-color);
+      font: inherit;
+      font-size: 14px;
+    }
+
+    input:focus {
+      border-color: var(--primary-color);
+      outline: none;
     }
 
     .empty {
