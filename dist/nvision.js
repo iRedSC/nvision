@@ -3018,4 +3018,4 @@ var t,e,i,n,s,a,o,r,c,l,h,d,u,m,p,g,f,_,v,y,b,x,w,$,k,M,C,S,A,z,P,E,I,T,O,L,N,F,
         animation: none;
       }
     }
-  `}};ne([At({attribute:!1})],Cc.prototype,"hass",void 0),ne([At({type:Boolean})],Cc.prototype,"preview",void 0),ne([Pt()],Cc.prototype,"_config",void 0),ne([Pt()],Cc.prototype,"_entries",void 0),ne([Pt()],Cc.prototype,"_connected",void 0),ne([Lt(".terminal-body")],Cc.prototype,"_body",void 0),Cc=ne([bt(ic)],Cc),console.info("%c nvision 0.1.0 ","color: var(--primary-color, #03a9f4); font-weight: 700;");
+  `}};ne([At({attribute:!1})],Cc.prototype,"hass",void 0),ne([At({type:Boolean})],Cc.prototype,"preview",void 0),ne([Pt()],Cc.prototype,"_config",void 0),ne([Pt()],Cc.prototype,"_entries",void 0),ne([Pt()],Cc.prototype,"_connected",void 0),ne([Lt(".terminal-body")],Cc.prototype,"_body",void 0),Cc=ne([bt(ic)],Cc),console.info("%c nvision 0.1.1 ","color: var(--primary-color, #03a9f4); font-weight: 700;");

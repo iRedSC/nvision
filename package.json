@@ -1,6 +1,6 @@
 {
   "name": "nvision",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Home Assistant dashboard cards",
   "scripts": {
     "start": "vite build --watch",

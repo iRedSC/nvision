@@ -30,7 +30,20 @@ git push origin v0.1.0
 
 **Before first HACS use:** GitHub repo needs a description, topics (`hacs`, `lovelace`, `home-assistant`), and at least one release tag.
 
+# Version
+
+After every edit, bump the version in `package.json` (printed to the browser console on load). Format: **major.minor.patch**
+
+| Bump | When |
+|------|------|
+| **Major** | Change requires user intervention (breaking config, migration, manual steps) |
+| **Minor** | Something added (new card, feature, option) |
+| **Patch** | Bug fix with no new content |
+
+Rebuild (`npm run build`) so `dist/nvision.js` includes the new version.
+
 # You (The Agent)
 
 1. Put yourself in a lucid mindset (ask youself if what you're doing is the optimal path before starting)
 2. Favor less code over more. Code is a burden, it makes everything harder to upkeep. Prefer ripping out chunks of code and replacing it with less.
+3. Bump the version (see above) as part of every change.
