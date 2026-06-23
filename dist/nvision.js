@@ -2536,7 +2536,7 @@ var t,e,i,n,s,a,o,r,c,l,h,d,u,m,p,g,f,_,v,y,b,x,w,$,k,M,C,S,A,z,P,E,I,T,O,L,N,F,
               ></ha-form>
             `}
       </div>
-    `}_addEntity(t){const e=t.detail.value;if("string"!=typeof e||!e)return;const i=[...this._config?.entities??[]];Br(i).some(t=>t.entityId===e)||(this._expandedIndex=i.length,this._emitConfig({entities:[...i,e]}))}_toggleRow(t){this._expandedIndex=this._expandedIndex===t?void 0:t}_addEntityFromForm(t){this._addEntity(new CustomEvent("value-changed",{detail:{value:t.detail.value.entity}}))}_removeEntity(t){const e=[...this._config?.entities??[]];e.splice(t,1),this._expandedIndex===t?this._expandedIndex=void 0:void 0!==this._expandedIndex&&this._expandedIndex>t&&(this._expandedIndex-=1),this._emitConfig({entities:e})}_entityPanelChanged(t,e){const{name:i,icon:n}=e.detail.value;this._applyEntityOverrides(t,i,n)}_applyEntityOverrides(t,e,i){const n=[...this._config?.entities??[]],s=n[t],a="string"==typeof s?s:s?.entity;if(!a)return;const o="string"==typeof s?{entity:a}:{...s},r=e?.trim()??"",c="string"==typeof i?i.trim():"";r?o.name=r:delete o.name,c?o.icon=c:delete o.icon,o.name||o.icon||o.image?n[t]=o:n[t]=a,this._emitConfig({entities:n})}_settingsChanged(t){this._emitConfig(t.detail.value)}_emitConfig(t){Ut(this,"config-changed",{config:{...this._config,...t}})}static{this.styles=o`
+    `}_addEntity(t){const e=t.detail.value;if("string"!=typeof e||!e)return;const i=[...this._config?.entities??[]];Br(i).some(t=>t.entityId===e)||(this._expandedIndex=i.length,this._emitConfig({entities:[...i,e]}))}_toggleRow(t){this._expandedIndex=this._expandedIndex===t?void 0:t}_addEntityFromForm(t){this._addEntity(new CustomEvent("value-changed",{detail:{value:t.detail.value.entity}}))}_removeEntity(t){const e=[...this._config?.entities??[]];e.splice(t,1),this._expandedIndex===t?this._expandedIndex=void 0:void 0!==this._expandedIndex&&this._expandedIndex>t&&(this._expandedIndex-=1),this._emitConfig({entities:e})}_entityPanelChanged(t,e){const{name:i,icon:n}=e.detail.value;this._applyEntityOverrides(t,{name:i,icon:n})}_applyEntityOverrides(t,e){const i=[...this._config?.entities??[]],n=i[t],s="string"==typeof n?n:n?.entity;if(!s)return;const a="string"==typeof n?{entity:s}:{...n};if(void 0!==e.name){const t=e.name.trim();t?a.name=t:delete a.name}if(void 0!==e.icon){const t=e.icon.trim();t?a.icon=t:delete a.icon}a.name||a.icon||a.image?i[t]=a:i[t]=s,this._emitConfig({entities:i})}_settingsChanged(t){this._emitConfig({...t.detail.value,entities:this._config?.entities??[]})}_emitConfig(t){const e={...this._config,...t,entities:t.entities??this._config?.entities??[]};this._config=e,Ut(this,"config-changed",{config:e})}static{this.styles=o`
     :host {
       display: block;
       overflow: visible;
@@ -2700,11 +2700,13 @@ var t,e,i,n,s,a,o,r,c,l,h,d,u,m,p,g,f,_,v,y,b,x,w,$,k,M,C,S,A,z,P,E,I,T,O,L,N,F,
                         class="entity-image"
                         src=${t.image}
                         alt=""
-                      />`:i?W`<ha-state-icon
-                          .hass=${this.hass}
-                          .stateObj=${i}
-                          .overrideIcon=${t.icon}
-                        ></ha-state-icon>`:K:K}
+                      />`:t.icon?W`<ha-icon
+                          class="entity-icon"
+                          .icon=${t.icon}
+                        ></ha-icon>`:i?W`<ha-state-icon
+                            .hass=${this.hass}
+                            .stateObj=${i}
+                          ></ha-state-icon>`:K:K}
                 <ha-tile-info
                   .primary=${s}
                   .secondary=${n}
@@ -2809,9 +2811,14 @@ var t,e,i,n,s,a,o,r,c,l,h,d,u,m,p,g,f,_,v,y,b,x,w,$,k,M,C,S,A,z,P,E,I,T,O,L,N,F,
       }
 
       ha-state-icon,
+      ha-icon.entity-icon,
       .entity-image {
         flex: none;
         color: var(--primary-text-color);
+      }
+
+      ha-icon.entity-icon {
+        --mdc-icon-size: var(--nv-icon-size);
       }
 
       .entity-image {

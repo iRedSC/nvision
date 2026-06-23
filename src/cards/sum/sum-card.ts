@@ -277,13 +277,17 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
                         src=${entry.image}
                         alt=""
                       />`
-                    : stateObj
-                      ? html`<ha-state-icon
-                          .hass=${this.hass}
-                          .stateObj=${stateObj}
-                          .overrideIcon=${entry.icon}
-                        ></ha-state-icon>`
-                      : nothing
+                    : entry.icon
+                      ? html`<ha-icon
+                          class="entity-icon"
+                          .icon=${entry.icon}
+                        ></ha-icon>`
+                      : stateObj
+                        ? html`<ha-state-icon
+                            .hass=${this.hass}
+                            .stateObj=${stateObj}
+                          ></ha-state-icon>`
+                        : nothing
                   : nothing}
                 <ha-tile-info
                   .primary=${primary}
@@ -396,9 +400,14 @@ export class NvisionSumCard extends LitElement implements LovelaceCard {
       }
 
       ha-state-icon,
+      ha-icon.entity-icon,
       .entity-image {
         flex: none;
         color: var(--primary-text-color);
+      }
+
+      ha-icon.entity-icon {
+        --mdc-icon-size: var(--nv-icon-size);
       }
 
       .entity-image {

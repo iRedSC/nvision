@@ -418,13 +418,12 @@ export class NvisionSumCardEditor
       icon?: string;
     };
 
-    this._applyEntityOverrides(index, name, icon);
+    this._applyEntityOverrides(index, { name, icon });
   }
 
   private _applyEntityOverrides(
     index: number,
-    name?: string,
-    icon?: string
+    patch: { name?: string; icon?: string }
   ): void {
     const entities = [...(this._config?.entities ?? [])];
     const current = entities[index];
@@ -438,19 +437,22 @@ export class NvisionSumCardEditor
     const next: SumEntityConfig =
       typeof current === "string" ? { entity: entityId } : { ...current };
 
-    const trimmedName = name?.trim() ?? "";
-    const trimmedIcon = typeof icon === "string" ? icon.trim() : "";
-
-    if (trimmedName) {
-      next.name = trimmedName;
-    } else {
-      delete next.name;
+    if (patch.name !== undefined) {
+      const trimmedName = patch.name.trim();
+      if (trimmedName) {
+        next.name = trimmedName;
+      } else {
+        delete next.name;
+      }
     }
 
-    if (trimmedIcon) {
-      next.icon = trimmedIcon;
-    } else {
-      delete next.icon;
+    if (patch.icon !== undefined) {
+      const trimmedIcon = patch.icon.trim();
+      if (trimmedIcon) {
+        next.icon = trimmedIcon;
+      } else {
+        delete next.icon;
+      }
     }
 
     if (!next.name && !next.icon && !next.image) {
@@ -463,16 +465,22 @@ export class NvisionSumCardEditor
   }
 
   private _settingsChanged(ev: CustomEvent): void {
-    this._emitConfig(ev.detail.value);
+    this._emitConfig({
+      ...ev.detail.value,
+      entities: this._config?.entities ?? [],
+    });
   }
 
   private _emitConfig(changes: Partial<SumCardConfig>): void {
-    fireEvent(this, "config-changed", {
-      config: {
-        ...this._config,
-        ...changes,
-      },
-    });
+    const config = {
+      ...this._config,
+      ...changes,
+      entities: changes.entities ?? this._config?.entities ?? [],
+    };
+
+    this._config = config;
+
+    fireEvent(this, "config-changed", { config });
   }
 
   static styles = css`
